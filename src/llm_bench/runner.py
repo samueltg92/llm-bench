@@ -101,8 +101,6 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
                     finish = event.finish_reason
             if finish is None:
                 raise RuntimeError("Incomplete stream")
-            if first is None:
-                raise RuntimeError("Stream returned no text or tools")
         except Exception as exc:
             error = exc
         elapsed = (end - start) / 1e6
@@ -195,6 +193,8 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
         }
         if not error and finish in {"length", "MAX_TOKENS", "FinishReason.MAX_TOKENS"}:
             row["status"] = "output_limit"
+        elif not error and not text.strip() and not tool_calls:
+            row["status"] = "empty_response"
         assistant = {"role": "assistant", "content": text}
         if tool_calls:
             assistant["tool_calls"] = tool_calls
@@ -393,6 +393,17 @@ def conversation(
                     bench["retries"],
                     hashes["tool_mode"],
                 )
+                if (
+                    row["status"] == "empty_response"
+                    and row["finish_reason"] == "stop"
+                    and call_index > 0
+                    and "?" in turn_text
+                    and calls[-1]["active_node_before"] != calls[-1]["active_node_after"]
+                ):
+                    # A completed silent response immediately after routing can
+                    # yield to the question already spoken in this user turn.
+                    # Record the silence explicitly; never fabricate a TTFT.
+                    row.update(status="ok", awaiting_user_after_route=True)
                 first_text_ns = first_text_ns or call_first_text
                 turn_rate_wait_ms += row.get("rate_limit_wait_ms", 0)
                 if not first_text_ns or first_text_ns == call_first_text:

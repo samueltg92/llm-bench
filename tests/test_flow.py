@@ -157,3 +157,58 @@ def test_rate_limit_wait_is_separate_from_latency(scenario, scripted, monkeypatc
     assert first["rate_limit_wait_ms"] == 0
     assert second["rate_limit_wait_ms"] == 65000
     assert second["ttft_ms"] == second["total_latency_ms"] == 0
+
+
+def test_completed_silence_after_route_preserves_question_and_usage(bundle, model, bench, tmp_path):
+    from llm_bench.providers.base import StreamEvent, Usage
+    from llm_bench.scenario import Scenario
+
+    class Provider:
+        count = 0
+
+        def stream_chat(self, **kwargs):
+            self.count += 1
+            if self.count == 1:
+                yield StreamEvent(kind="text", text="¿Qué necesitas consultar?")
+                yield StreamEvent(
+                    kind="tool_call",
+                    call_id="route1",
+                    name="route_node",
+                    arguments='{"target_node":"Consulta"}',
+                )
+            elif self.count == 3:
+                yield StreamEvent(kind="text", text="Puedo orientarte con tu consulta.")
+            yield StreamEvent(kind="usage", usage=Usage(prompt_tokens=100, completion_tokens=20))
+            yield StreamEvent(kind="done", finish_reason="stop")
+
+    s = Scenario(
+        id="route_wait",
+        project="project_1",
+        turns=[{"content": "Hola"}, {"content": "Necesito orientación"}],
+    )
+    result = conversation(
+        bundle,
+        s,
+        "fake",
+        model,
+        Provider(),
+        {"input": 1, "output": 2, "last_verified": "synthetic"},
+        bench,
+        tmp_path,
+    )
+    assert result["status"] == "ok" and result["turns_completed"] == 2
+    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
+    assert calls[1]["awaiting_user_after_route"] is True
+    assert calls[1]["ttft_ms"] is None
+    assert calls[1]["cost_usd"] == pytest.approx(0.00014)
+    assert result["conversation_cost_usd"] == pytest.approx(0.00042)
+
+
+def test_unprompted_empty_response_remains_incomplete(bundle, scenario, model, bench, tmp_path):
+    from conftest import ScriptProvider
+
+    result = conversation(
+        bundle, scenario, "fake", model, ScriptProvider([""]), None, bench, tmp_path
+    )
+    assert result["status"] == "empty_response"
+    assert result["turns_completed"] == 0
