@@ -60,6 +60,8 @@ def aggregate(runs, calls):
             "concurrent": key[8],
             "synthetic": key[9],
             "retried": key[12],
+            "scenario_sha256": key[10],
+            "source_sha256": key[11],
             "tool_modes": ",".join(tool_modes),
             "repetitions": len(members),
             "measured_calls": len(measured),
@@ -130,19 +132,20 @@ def table(rows, fields):
     )
 
 
-def conversation_review(run_dir: Path):
+def conversation_review(run_dir: Path, recursive=False):
     """Readable private dialogue; keep model reasoning out of the spoken transcript."""
     run_dir = external_path(run_dir)
     sections = [
         "# Conversaciones — revisión privada",
         "No publicar. Las respuestas de herramientas son simuladas; no verifican datos reales.",
     ]
-    for path in sorted((run_dir / "transcripts").glob("*.json")):
+    paths = run_dir.rglob("transcripts/*.json") if recursive else (run_dir / "transcripts").glob("*.json")
+    for path in sorted(paths):
         item = json.loads(path.read_text())
         sections.extend(
             [
                 f"## {item.get('scenario', '')} / {item.get('model_key', '')}",
-                f"Registro original: transcripts/{path.name}",
+                f"Registro original: {path.relative_to(run_dir)}",
             ]
         )
         for message in item.get("history", []):
@@ -178,10 +181,16 @@ def conversation_review(run_dir: Path):
     write_private(run_dir / "CONVERSATIONS.md", "\n\n".join(sections), plain=True)
 
 
-def report(run_dir: Path):
+def report(run_dir: Path, recursive=False):
     run_dir = external_path(run_dir)
-    runs = read_lines(run_dir / "runs.jsonl")
-    calls = read_lines(run_dir / "calls.jsonl")
+    def collect(filename):
+        paths = sorted(run_dir.rglob(filename)) if recursive else [run_dir / filename]
+        return [row for path in paths for row in read_lines(path)]
+
+    runs = collect("runs.jsonl")
+    calls = collect("calls.jsonl")
+    if len({r["run_id"] for r in runs}) != len(runs):
+        raise ValueError("Duplicate conversation IDs in report input")
     rows = aggregate(runs, calls)
     if rows:
         buffer = io.StringIO()
@@ -301,7 +310,7 @@ def report(run_dir: Path):
         f"Calentamientos registrados y excluidos: {len(warmups)}. Costo conocido: {cell(total_known(c.get('cost_usd') for c in warmups))} USD."
     )
     write_private(run_dir / "REPORT.md", "\n\n".join(sections), plain=True)
-    conversation_review(run_dir)
+    conversation_review(run_dir, recursive)
     return rows
 
 
@@ -318,6 +327,8 @@ def compare(rows, baseline):
         "synthetic",
         "retried",
         "tool_modes",
+        "scenario_sha256",
+        "source_sha256",
     ]
     lookup = {tuple(r[k] for k in keys): r for r in rows if r["model"] == baseline}
     compared = []

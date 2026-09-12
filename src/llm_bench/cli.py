@@ -298,18 +298,22 @@ def audit_context(
 
 
 @app.command()
-def report(run_dir: Annotated[Path, typer.Option(exists=True)], format: str = "all"):
+def report(
+    run_dir: Annotated[Path, typer.Option(exists=True)], format: str = "all", recursive: bool = False
+):
     """Regenera CSV e informe Markdown privados."""
     if format not in ("all", "table", "csv", "md"):
         raise typer.BadParameter("Formato: all,table,csv,md")
-    rows = make_report(run_dir)
+    rows = make_report(run_dir, recursive=recursive)
     if format in ("all", "table"):
         emit(rows)
 
 
 @app.command()
-def compare(run_dir: Annotated[Path, typer.Option(exists=True)], baseline: str):
+def compare(
+    run_dir: Annotated[Path, typer.Option(exists=True)], baseline: str, recursive: bool = False
+):
     """Deltas contra un baseline, solo para condiciones equivalentes."""
-    rows = comparisons(make_report(run_dir), baseline)
+    rows = comparisons(make_report(run_dir, recursive=recursive), baseline)
     write_private(run_dir / "comparison.json", rows)
     emit(rows)

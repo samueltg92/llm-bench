@@ -105,3 +105,34 @@ def test_private_conversation_review_preserves_dialogue_and_tools(tmp_path):
     assert "INTERNAL_ANALYSIS" not in output
     assert "<script>" not in output and "&lt;script&gt;" in output
     assert "routing_path" in output
+
+
+def test_recursive_report_compares_only_identical_case_and_source(
+    bundle, scenario, model, bench, scripted, tmp_path
+):
+    import copy
+
+    first = tmp_path / "first"
+    conversation(bundle, scenario, "model-a", model, scripted, None, bench, first)
+    second = tmp_path / "second"
+    second.mkdir()
+    original = json.loads((first / "runs.jsonl").read_text())
+    other = copy.deepcopy(original)
+    other.update(run_id="second-run", model_key="model-b")
+    (second / "runs.jsonl").write_text(json.dumps(other))
+    calls = [json.loads(x) for x in (first / "calls.jsonl").read_text().splitlines()]
+    for call in calls:
+        call.update(run_id="second-run", model_key="model-b")
+    (second / "calls.jsonl").write_text("\n".join(json.dumps(c) for c in calls))
+    rows = report(tmp_path, recursive=True)
+    assert len(rows) == 2
+    assert len(compare(rows, "model-a")) == 1
+    assert "first/transcripts/" in (tmp_path / "CONVERSATIONS.md").read_text()
+    for field in ["scenario_sha256", "source_sha256"]:
+        changed = copy.deepcopy(rows)
+        next(r for r in changed if r["model"] == "model-b")[field] = "different"
+        assert compare(changed, "model-a") == []
+    other["run_id"] = original["run_id"]
+    (second / "runs.jsonl").write_text(json.dumps(other))
+    with pytest.raises(ValueError, match="Duplicate"):
+        report(tmp_path, recursive=True)

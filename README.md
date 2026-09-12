@@ -189,6 +189,12 @@ se comparte entre los casos de ese modelo dentro de la ejecución. Las pausas se
 registran aparte y se excluyen de TTFT y latencia del modelo. Una petición que exceda
 la cuota se detiene sin recortar el prompt. Las estimaciones entre tokenizadores y
 el tráfico de otros procesos pueden provocar límites adicionales del proveedor.
+
+Para consolidar tandas guardadas en subdirectorios, usa `vbench report --run-dir
+/ruta/privada/results --recursive`. El informe agrupa cada caso y modelo y conserva
+las conversaciones completas en un documento privado. `vbench compare --run-dir
+/ruta/privada/results --recursive --baseline model-a` calcula deltas solo cuando
+coinciden las huellas del escenario y del origen, además de las condiciones de ejecución.
 Al migrar un registro con consumo previo, conserva su historial y asigna también ese consumo.
 No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
 proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.
