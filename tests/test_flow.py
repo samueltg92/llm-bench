@@ -212,3 +212,41 @@ def test_unprompted_empty_response_remains_incomplete(bundle, scenario, model, b
     )
     assert result["status"] == "empty_response"
     assert result["turns_completed"] == 0
+
+
+def test_explicit_platform_close_ends_without_another_request(bundle, model, bench, tmp_path):
+    from conftest import ScriptProvider
+
+    from llm_bench.scenario import Scenario
+
+    scenario = Scenario(
+        id="platform_close", project="project_1",
+        turns=[{"content": "Termina la conversación."}],
+        platform_tools=[{
+            "name": "finish_session", "description": "End the simulated session.",
+            "nodes": ["Inicio"],
+            "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        }],
+        tool_mocks={"finish_session": {"response": {"ok": True}}},
+        terminal_tools=["finish_session"],
+    )
+    scenario.validate_bundle(bundle)
+    _, tools, _ = build(bundle, scenario, "start", "active_node", {})
+    assert "finish_session" in {t["function"]["name"] for t in tools}
+    _, tools, _ = build(bundle, scenario, "query", "active_node", {})
+    assert "finish_session" not in {t["function"]["name"] for t in tools}
+    provider = ScriptProvider([[('finish_session', {}), ('verificar', {'documento': 'DEMO'})]])
+    result = conversation(bundle, scenario, "fake", model, provider, None, bench, tmp_path)
+    assert len(provider.requests) == result["llm_calls"] == 1
+    assert result["status"] == "ok" and result["turns_completed"] == 1
+    assert result["tool_calls_total"] == 2  # Both attempts remain visible; only close is dispatched.
+    transcript = json.loads(next((tmp_path / "transcripts").glob("*.json")).read_text())
+    assert [tool["name"] for tool in transcript["tools"]] == ["finish_session"]
+    assert result["tool_schema_unverified"] == 1  # Explicit assumed schema, not production verification.
+    assert result["invalid_tool_calls"] == 0
+    scenario.tool_mocks = {}
+    with pytest.raises(ValueError, match="explicit mock"):
+        scenario.validate_bundle(bundle)
+    scenario.platform_tools[0].name = "verificar"
+    with pytest.raises(ValueError, match="conflicts"):
+        scenario.validate_bundle(bundle)

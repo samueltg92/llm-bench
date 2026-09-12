@@ -61,6 +61,10 @@ def build(
     tools = [
         copy.deepcopy(t.api()) for t in bundle.tools if t.name in names and t.name != "route_node"
     ]
+    selected_ids = {n.id for n in selected}
+    for tool in scenario.platform_tools:
+        if any(bundle.node(ref).id in selected_ids for ref in tool.nodes):
+            tools.append(tool.tool().api())
     if node.transitions and effective != "single_node":
         # Even full mode only authorizes transitions from the actual active node.
         tools.append(route_tool(list(node.transitions)).api())

@@ -195,6 +195,17 @@ Para consolidar tandas guardadas en subdirectorios, usa `vbench report --run-dir
 las conversaciones completas en un documento privado. `vbench compare --run-dir
 /ruta/privada/results --recursive --baseline model-a` calcula deltas solo cuando
 coinciden las huellas del escenario y del origen, además de las condiciones de ejecución.
+
+Si el prompt exige una herramienta de plataforma que no aparece en el export, el
+escenario puede declarar `platform_tools` con `name`, `description`, `nodes` y
+`parameters_schema`. Cada declaración requiere una respuesta en `tool_mocks` y no
+puede reemplazar herramientas existentes. El contrato supuesto queda en el manifiesto
+y sus llamadas se identifican como schema no verificado contra producción.
+
+Se evalúa el intento de function call emitido por el modelo; no se contactan servicios
+reales. La disponibilidad o falla del backend simulado se registra aparte. Una tool
+incluida en `terminal_tools` termina la simulación inmediatamente tras una llamada
+válida con mock exitoso, conservando el intento y evitando peticiones posteriores al LLM.
 Al migrar un registro con consumo previo, conserva su historial y asigna también ese consumo.
 No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
 proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.

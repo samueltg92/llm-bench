@@ -5,7 +5,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .bundle import Bundle
+from .bundle import Bundle, Tool
 
 
 class Strict(BaseModel):
@@ -42,6 +42,21 @@ class MockResponse(Strict):
     error: bool = False
 
 
+class PlatformTool(Strict):
+    """Explicit simulated platform interface missing from a business export."""
+
+    name: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    description: str
+    nodes: list[str] = Field(min_length=1)
+    parameters_schema: dict
+
+    def tool(self):
+        return Tool(
+            name=self.name, original_name=self.name, description=self.description,
+            parameters_schema=self.parameters_schema, synthetic=True,
+        )
+
+
 class Scenario(Strict):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     project: str = Field(pattern=r"^project_[1-9][0-9]*$")
@@ -59,6 +74,7 @@ class Scenario(Strict):
     tool_limits_per_turn: dict[str, int] = Field(default_factory=dict)
     terminal_nodes: list[str] = Field(default_factory=list)
     terminal_tools: list[str] = Field(default_factory=list)
+    platform_tools: list[PlatformTool] = Field(default_factory=list)
     default_mock: MockResponse = Field(default_factory=MockResponse)
     rules: list[Rule] = Field(default_factory=list)
     expected_path: list[str] = Field(default_factory=list)
@@ -94,6 +110,17 @@ class Scenario(Strict):
             if bundle.node(b).id not in bundle.node(a).transitions.values():
                 raise ValueError("Expected path contains an impossible transition")
         names = {t.name for t in bundle.tools}
+        for tool in self.platform_tools:
+            if tool.name == "route_node" or tool.name in names:
+                raise ValueError("Platform tool conflicts with an existing tool")
+            for ref in tool.nodes:
+                bundle.node(ref)
+            if tool.name not in self.tool_mocks:
+                raise ValueError("Platform tools require explicit mock responses")
+            import jsonschema
+
+            jsonschema.Draft202012Validator.check_schema(tool.parameters_schema)
+            names.add(tool.name)
         for turn in self.turns:
             if turn.expected_node:
                 bundle.node(turn.expected_node)

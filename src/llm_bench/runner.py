@@ -221,6 +221,8 @@ def resolve_tool(call, bundle, scenario, active, variables, allowed_names, route
     name = call["function"]["name"]
     before = active
     tool = next((t for t in bundle.tools if t.name == name), None)
+    if tool is None:
+        tool = next((t.tool() for t in scenario.platform_tools if t.name == name), None)
     reason, arguments = None, {}
     try:
         arguments = json.loads(call["function"]["arguments"])
@@ -431,6 +433,10 @@ def conversation(
                         status = "tool_iteration_limit"
                     else:
                         allowed_names = set(bundle.node(active).tool_names)
+                        allowed_names.update(
+                            tool.name for tool in scenario.platform_tools
+                            if any(bundle.node(ref).id == active for ref in tool.nodes)
+                        )
                         routed = False
                         for call in assistant["tool_calls"]:
                             previous = active
@@ -457,8 +463,11 @@ def conversation(
                                 and call["function"]["name"] in scenario.terminal_tools
                             ):
                                 terminal = True
+                                break
                         if active in {bundle.node(n).id for n in scenario.terminal_nodes}:
                             terminal = True
+                        if terminal:
+                            final_response = True
                 else:
                     final_response = True
                 row["active_node_after"] = active
