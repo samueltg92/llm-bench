@@ -70,6 +70,11 @@ def plan(pairs, models, prices, bench, modes, dedup=False):
                     max_tokens = max(max_tokens, request_tokens(ms, ts))
             turns = min(len(scenario.turns), scenario.max_turns)
             call_count = turns * (bench["max_tool_iterations"] + 1)
+            if bench.get("max_calls_per_conversation") is not None:
+                cap = bench["max_calls_per_conversation"]
+                if not isinstance(cap, int) or cap < 1:
+                    raise ValueError("max_calls_per_conversation must be a positive integer")
+                call_count = min(call_count, cap)
             mock_tokens = max(
                 [count(m.response) for m in scenario.tool_mocks.values()]
                 + [count(scenario.default_mock.response)]
@@ -172,6 +177,7 @@ def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=Non
     def run_model(item):
         key, model = item
         provider = create(model, bench["timeouts"])
+        provider.min_request_interval_s = max(0, float(bench.get("min_request_interval_s", 0)))
         try:
             if bench.get("warmup", True):
                 scenario = Scenario(

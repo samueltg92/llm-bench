@@ -45,7 +45,16 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
         first = first_text = first_tool = None
         finish = None
         error = None
+        wait_start = time.perf_counter_ns()
+        interval = getattr(provider, "min_request_interval_s", 0)
+        previous_start = getattr(provider, "last_request_started_ns", None)
+        if interval and previous_start is not None:
+            remaining = interval - (wait_start - previous_start) / 1e9
+            if remaining > 0:
+                time.sleep(remaining)
+        rate_wait_ms = (time.perf_counter_ns() - wait_start) / 1e6 if interval else 0
         start = end = time.perf_counter_ns()
+        provider.last_request_started_ns = start
         try:
             for event in provider.stream_chat(
                 messages=messages,
@@ -105,6 +114,7 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
             "partial_text": text,
             "partial_tools": list(tool_deltas.values()),
             "usage": asdict(usage),
+            "rate_limit_wait_ms": rate_wait_ms,
         }
         attempts.append(attempt_data)
         if error and retryable(error) and attempt + 1 < policy["max_attempts"]:
@@ -163,6 +173,7 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
             else None,
             "retries": attempt,
             "flagged": attempt > 0,
+            "rate_limit_wait_ms": sum(a["rate_limit_wait_ms"] for a in attempts),
             "ttft_ms": (first - start) / 1e6 if first and not error else None,
             "first_text_ms": (first_text - start) / 1e6 if first_text and not error else None,
             "first_tool_ms": (first_tool - start) / 1e6 if first_tool and not error else None,
@@ -309,11 +320,15 @@ def conversation(
         for turn_index, turn in enumerate(scenario.turns[: scenario.max_turns]):
             turn_start = time.perf_counter_ns()
             first_text_ns = None
+            turn_rate_wait_ms = first_text_rate_wait_ms = 0
             turn_tools, turn_text = [], ""
             content = turn.content_by_node.get(bundle.node(active).name, turn.content)
             history.append({"role": "user", "content": render(content, variables)})
             final_response = False
             for call_index in range(bench["max_tool_iterations"] + 1):
+                if len(calls) >= bench.get("max_calls_per_conversation", float("inf")):
+                    status = "call_limit"
+                    break
                 system, definitions, effective = build(
                     bundle, scenario, active, mode, variables, active_dedup
                 )
@@ -377,6 +392,9 @@ def conversation(
                     hashes["tool_mode"],
                 )
                 first_text_ns = first_text_ns or call_first_text
+                turn_rate_wait_ms += row.get("rate_limit_wait_ms", 0)
+                if not first_text_ns or first_text_ns == call_first_text:
+                    first_text_rate_wait_ms = turn_rate_wait_ms
                 history.append(assistant)
                 turn_text += assistant.get("content") or ""
                 row.update({**meta, "degraded": state == "degraded", "invalid_tool_calls": 0})
@@ -446,8 +464,15 @@ def conversation(
                     "text": turn_text,
                     "tools": turn_tools,
                     "completed": final_response,
-                    "first_text_ms": (first_text_ns - turn_start) / 1e6 if first_text_ns else None,
-                    "total_ms": (time.perf_counter_ns() - turn_start) / 1e6,
+                    "first_text_ms": max(
+                        0, (first_text_ns - turn_start) / 1e6 - first_text_rate_wait_ms
+                    )
+                    if first_text_ns
+                    else None,
+                    "total_ms": max(
+                        0, (time.perf_counter_ns() - turn_start) / 1e6 - turn_rate_wait_ms
+                    ),
+                    "rate_limit_wait_ms": turn_rate_wait_ms,
                     "assertions": assertions,
                     "language": language_check(turn_text),
                 }

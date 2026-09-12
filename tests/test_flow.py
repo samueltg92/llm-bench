@@ -113,3 +113,32 @@ def test_dry_plan_never_creates_provider(bundle, scenario, model, bench, monkeyp
     rows = plan([(bundle, scenario)], {"fake": model}, {}, bench, ["full", "active_node"])
     assert len(rows) == 2
     assert all(r["estimated_cost_usd"] is None for r in rows)
+
+
+def test_call_cap_matches_plan_and_stops_network(
+    bundle, scenario, model, bench, scripted, tmp_path
+):
+    bench["max_calls_per_conversation"] = 3
+    rows = plan([(bundle, scenario)], {"fake": model}, {}, bench, ["active_node"])
+    assert rows[0]["max_calls_per_conversation"] == 3
+    result = conversation(bundle, scenario, "fake", model, scripted, None, bench, tmp_path)
+    assert result["status"] == "call_limit"
+    assert len(scripted.requests) == result["llm_calls"] == 3
+    assert result["turns_completed"] == 0
+
+
+def test_rate_limit_wait_is_separate_from_latency(scenario, scripted, monkeypatch):
+    from llm_bench.runner import measure
+
+    now = [1_000_000_000]
+    monkeypatch.setattr("llm_bench.runner.time.perf_counter_ns", lambda: now[0])
+    monkeypatch.setattr(
+        "llm_bench.runner.time.sleep",
+        lambda seconds: now.__setitem__(0, now[0] + int(seconds * 1e9)),
+    )
+    scripted.min_request_interval_s = 65
+    first, _, _ = measure(scripted, [], [], scenario, None)
+    second, _, _ = measure(scripted, [], [], scenario, None)
+    assert first["rate_limit_wait_ms"] == 0
+    assert second["rate_limit_wait_ms"] == 65000
+    assert second["ttft_ms"] == second["total_latency_ms"] == 0

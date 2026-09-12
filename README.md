@@ -126,6 +126,14 @@ externos a esta CLI, impuestos ni cambios de tarifas del proveedor.
 `doctor --online --max-output-tokens 512` permite margen para modelos que razonan;
 una respuesta truncada se informa como `output_limit`.
 
+Para pilotos, `bench.yaml` permite `max_calls_per_conversation` como tope global
+de llamadas por conversación, manteniendo las transiciones y el historial. El
+plan de presupuesto usa ese mismo tope y la ejecución devuelve `call_limit` si
+se agota. `min_request_interval_s` espacia solicitudes de cada modelo; esas
+esperas se registran aparte como `rate_limit_wait_ms` y se excluyen de las
+latencias de inferencia y de turno. Con cuota compartida entre modelos, usa
+concurrencia 1 y evita otras ejecuciones simultáneas de la misma cuenta.
+
 Gemma está deshabilitado inicialmente porque la oferta gratuita declara uso de datos para
 mejorar productos. Revisa las condiciones del servicio antes de habilitarlo con datos privados.
 Las verificaciones documentales y las pruebas de conectividad son distintas; estas últimas
