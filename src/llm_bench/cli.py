@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 from typing import Annotated
 
@@ -29,6 +30,32 @@ def csv_list(value):
 
 def emit(value):
     typer.echo(json.dumps(value, ensure_ascii=False, default=str, indent=2))
+
+
+def diagnostic_error(exc):
+    """Expose only numeric diagnostics; exception bodies can contain private data."""
+    result = {}
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and 100 <= status <= 599:
+        result["http_status"] = status
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        details = body.get("error", body)
+        if isinstance(details, dict) and re.fullmatch(r"[0-9]{1,6}", str(details.get("code", ""))):
+            result["provider_error_code"] = str(details["code"])
+    headers = getattr(getattr(exc, "response", None), "headers", {})
+    allowed = (
+        "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining",
+        "x-ratelimit-limit-requests", "x-ratelimit-remaining-requests",
+        "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens",
+    )
+    numeric_headers = {
+        name: str(headers[name]) for name in allowed
+        if name in headers and re.fullmatch(r"[0-9]{1,9}(?:\.[0-9]{1,6})?", str(headers[name]))
+    }
+    if numeric_headers:
+        result["rate_limit_headers"] = numeric_headers
+    return result
 
 
 @app.command()
@@ -63,6 +90,7 @@ def doctor(
     online: bool = False,
     max_output_tokens: Annotated[int, typer.Option(min=1)] = 512,
     budget_file: Path | None = None,
+    out: Path | None = None,
 ):
     """Valida configuración; --online hace una inferencia breve con texto sintético."""
     if env_file:
@@ -118,9 +146,12 @@ def doctor(
                     )
             except Exception as exc:
                 row["online_status"] = type(exc).__name__
+                row.update(diagnostic_error(exc))
             finally:
                 provider.close()
         rows.append(row)
+    if out:
+        write_private(out, rows)
     emit(rows)
 
 

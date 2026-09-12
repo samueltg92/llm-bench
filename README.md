@@ -167,6 +167,11 @@ Reemplaza los alias por las claves del catálogo. El preflight muestra la reserv
 incluyendo calentamiento y reintentos. Un modelo no puede utilizar el saldo de otro;
 modelos sin presupuesto asignado se rechazan. Las reservas de varios modelos son atómicas.
 El total reservado debe coincidir con la suma de los saldos reservados por modelo.
+
+`doctor --online --out /ruta/privada/diagnostico.json` guarda el diagnóstico fuera
+de Git. Si una petición falla, muestra el estado HTTP, códigos numéricos del proveedor
+y cabeceras numéricas de límites disponibles, sin copiar el cuerpo del error ni credenciales.
+El saldo disponible y los límites de solicitudes o tokens son controles distintos.
 Al migrar un registro con consumo previo, conserva su historial y asigna también ese consumo.
 No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
 proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.

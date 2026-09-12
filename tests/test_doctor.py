@@ -53,3 +53,24 @@ def test_doctor_reasoning_budget_and_truncation(tmp_path, monkeypatch, finish, t
     assert captured["closed"]
     assert "synthetic-placeholder" not in result.output
     assert float(json.loads(budget.read_text())["reserved_usd"]) > 0
+
+
+def test_diagnostics_keep_numeric_limits_and_never_echo_error_content():
+    import httpx
+    from openai import RateLimitError
+
+    from llm_bench.cli import diagnostic_error
+
+    response = httpx.Response(429, request=httpx.Request("POST", "https://example.test"), headers={
+        "retry-after": "60", "x-ratelimit-remaining": "0",
+        "x-ratelimit-limit-tokens": "private content", "authorization": "private credential",
+    })
+    error = RateLimitError("private request content", response=response, body={
+        "message": "private input", "code": "1300", "type": "private value",
+    })
+    assert diagnostic_error(error) == {
+        "http_status": 429, "provider_error_code": "1300",
+        "rate_limit_headers": {"retry-after": "60", "x-ratelimit-remaining": "0"},
+    }
+    error.body["code"] = "private credential"
+    assert "provider_error_code" not in diagnostic_error(error)
