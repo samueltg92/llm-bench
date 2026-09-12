@@ -93,3 +93,21 @@ def test_publication_guard_catches_name_prompt_and_populated_env():
     assert "populated_env_template" in mod.violations(
         ".env.example", b"API_KEY=something", [], set()
     )
+
+
+@pytest.mark.parametrize(
+    "name,content,blocked",
+    [
+        ("README.md", b"Client ZZ", True),
+        ("docs/zz_report.md", b"Numbers only", True),
+        ("README.md", b"client-zz-results", True),
+        ("README.md", b"puzzle https://example.invalid", False),
+    ],
+)
+def test_publication_guard_handles_private_acronyms(name, content, blocked):
+    path = Path(__file__).parents[1] / "scripts/check_public.py"
+    spec = importlib.util.spec_from_file_location("publication_guard_acronyms", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    reasons = mod.violations(name, content, [], set(), ["zz"])
+    assert ("private_name" in reasons) is blocked

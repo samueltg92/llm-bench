@@ -18,9 +18,16 @@ git config bench.privateGuard /ruta/privada/publication-guard.json
 ```
 
 El guard privado contiene `terms` (nombres prohibidos) y `corpus_files` (exports originales).
+También admite `whole_word_terms` para siglas: detecta identificadores separados por espacios,
+guiones o guiones bajos sin bloquear palabras o URLs que solo contienen esas letras.
 Se compara el contenido público contra nombres y fragmentos del corpus sin copiar ese corpus
 al repositorio. CI no recibe datos privados. Un guard configurado que no se puede leer bloquea
 la revisión. La revisión local con corpus debe completarse antes de publicar.
+
+Se pueden compartir nombres de modelos y resultados numéricos revisados y anonimizados.
+Antes de publicar un resultado, revisar el archivo completo, metadatos, nombres de archivo,
+rutas, tablas y etiquetas. Los datos crudos, prompts y transcripciones permanecen privados.
+No publicar automáticamente el directorio de resultados ni la correspondencia de alias.
 
 Los hooks pueden omitirse manualmente y el detector no garantiza descubrir todos los secretos
 posibles. Revisa el diff staged y evita `git add -f` con archivos privados. No subas artefactos

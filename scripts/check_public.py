@@ -2,7 +2,8 @@
 """Scan staged or committed bytes, never print matched content.
 
 Optional private guard file: git config bench.privateGuard /external/guard.json
-Schema: {"terms": ["private name"], "corpus_files": ["/external/input.json"]}.
+Schema: {"terms": ["private name"], "whole_word_terms": ["private acronym"],
+         "corpus_files": ["/external/input.json"]}.
 The guard itself must stay outside Git. Local commit and push hooks both use it.
 """
 
@@ -50,10 +51,11 @@ def guard_data():
         os.environ.get("BENCH_PRIVATE_GUARD")
         or git("config", "--get", "bench.privateGuard", check=False).decode().strip()
     )
-    terms, fragments = [], set()
+    terms, fragments, whole_word_terms = [], set(), []
     if location:
         data = json.loads(Path(location).read_text())
         terms = [term.casefold().encode() for term in data.get("terms", []) if term]
+        whole_word_terms = [term.casefold() for term in data.get("whole_word_terms", []) if term]
         for source in data.get("corpus_files", []):
             data = json.loads(Path(source).read_text())
             for text in strings(data):
@@ -63,10 +65,10 @@ def guard_data():
                         # Several windows detect partial pasted prompt paragraphs as well.
                         for offset in range(0, len(line) - 79, 40):
                             fragments.add(line[offset : offset + 80].casefold().encode())
-    return terms, fragments
+    return terms, fragments, whole_word_terms
 
 
-def violations(name, content, terms, fragments):
+def violations(name, content, terms, fragments, whole_word_terms=()):
     reasons = []
     path = Path(name)
     if name not in ROOT_FILES and (not path.parts or path.parts[0] not in DIRECTORIES):
@@ -91,6 +93,14 @@ def violations(name, content, terms, fragments):
     combined = (name + "\n" + content.decode(errors="replace")).casefold().encode()
     if any(term in combined for term in terms):
         reasons.append("private_name")
+    # Underscores and hyphens delimit identifiers; substrings inside ordinary words do not.
+    if any(
+        re.search(
+            r"(?<![^\W_])" + re.escape(term) + r"(?![^\W_])", combined.decode(errors="replace")
+        )
+        for term in whole_word_terms
+    ):
+        reasons.append("private_name")
     collapsed = " ".join(combined.decode(errors="replace").split()).encode()
     if any(fragment in collapsed for fragment in fragments):
         reasons.append("private_corpus_overlap")
@@ -105,7 +115,7 @@ def violations(name, content, terms, fragments):
 
 
 def scan(staged=False, history=False):
-    terms, fragments = guard_data()
+    terms, fragments, whole_word_terms = guard_data()
     errors, checked = [], 0
     if history:
         revisions = git("rev-list", "--all").decode().splitlines()
@@ -129,20 +139,20 @@ def scan(staged=False, history=False):
                 continue
             seen.add(signature)
             checked += 1
-            found = violations(name, content, terms, fragments)
+            found = violations(name, content, terms, fragments, whole_word_terms)
             if found:
                 # Even filenames can be private. Report only a sequential identifier.
                 errors.append({"file_index": checked, "reasons": found})
         if revision:
-            message = git("show", "-s", "--format=%B", revision)
-            found = violations("README.md", message, terms, fragments)
+            message = git("show", "-s", "--format=%an%n%ae%n%cn%n%ce%n%B", revision)
+            found = violations("README.md", message, terms, fragments, whole_word_terms)
             if found:
                 errors.append({"commit_message": True, "reasons": found})
     print(
         json.dumps(
             {
                 "files_checked": checked,
-                "private_guard_loaded": bool(terms or fragments),
+                "private_guard_loaded": bool(terms or fragments or whole_word_terms),
                 "violations": errors,
             }
         )
