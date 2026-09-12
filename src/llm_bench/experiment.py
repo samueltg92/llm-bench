@@ -13,6 +13,7 @@ from .privacy import external_path, fingerprint, write_private
 from .prompt import build, prepare
 from .providers.base import Usage
 from .providers.registry import create
+from .rate_limit import RequestPacer
 from .runner import context_status, conversation, measure
 from .scenario import Scenario, load
 from .tokens import count, request_tokens
@@ -192,6 +193,9 @@ def execute(
         provider = create(model, bench["timeouts"])
         if reservation:
             provider = ReservedProvider(provider, model, prices[key], reservation["models"][key])
+        rate_config = bench.get("rate_limits_by_model", {}).get(key)
+        if rate_config:
+            provider.request_pacer = RequestPacer(**rate_config)
         provider.min_request_interval_s = max(0, float(bench.get("min_request_interval_s", 0)))
         try:
             if bench.get("warmup", True):

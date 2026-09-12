@@ -172,6 +172,23 @@ El total reservado debe coincidir con la suma de los saldos reservados por model
 de Git. Si una petición falla, muestra el estado HTTP, códigos numéricos del proveedor
 y cabeceras numéricas de límites disponibles, sin copiar el cuerpo del error ni credenciales.
 El saldo disponible y los límites de solicitudes o tokens son controles distintos.
+
+Para respetar cuotas de una cuenta, `bench.yaml` admite límites por modelo:
+
+```yaml
+rate_limits_by_model:
+  model-a:
+    tokens_per_minute: 100000
+    requests_per_second: 1.67
+    input_margin: 1.2
+```
+
+El ejecutor espacia solicitudes y reserva tokens estimados de entrada con margen,
+más toda la salida permitida, durante una ventana móvil de 61 segundos. El contador
+se comparte entre los casos de ese modelo dentro de la ejecución. Las pausas se
+registran aparte y se excluyen de TTFT y latencia del modelo. Una petición que exceda
+la cuota se detiene sin recortar el prompt. Las estimaciones entre tokenizadores y
+el tráfico de otros procesos pueden provocar límites adicionales del proveedor.
 Al migrar un registro con consumo previo, conserva su historial y asigna también ese consumo.
 No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
 proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.

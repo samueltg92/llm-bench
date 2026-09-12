@@ -52,7 +52,10 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
             remaining = interval - (wait_start - previous_start) / 1e9
             if remaining > 0:
                 time.sleep(remaining)
-        rate_wait_ms = (time.perf_counter_ns() - wait_start) / 1e6 if interval else 0
+        pacer = getattr(provider, "request_pacer", None)
+        if pacer:
+            pacer.acquire(request_tokens(messages, tools), scenario.max_output_tokens)
+        rate_wait_ms = (time.perf_counter_ns() - wait_start) / 1e6 if interval or pacer else 0
         start = end = time.perf_counter_ns()
         provider.last_request_started_ns = start
         try:
