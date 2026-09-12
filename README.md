@@ -81,7 +81,8 @@ El texto visible en un canal de respuesta se considera texto aunque revele razon
 señales de idioma y reglas ayudan a detectarlo. Las reglas no implementadas no se consideran
 aprobadas. La detección de idiomas es heurística y deja casos ambiguos como desconocidos.
 
-Se guardan `manifest.json`, `calls.jsonl`, `runs.jsonl`, `transcripts/`, `summary.csv` y `REPORT.md`.
+Se guardan `manifest.json`, `calls.jsonl`, `runs.jsonl`, `transcripts/`, `summary.csv`, `REPORT.md` y `CONVERSATIONS.md`.
+Este último permite revisar preguntas, respuestas y resultados simulados en orden.
 La salida completa es **privada**. El sistema aplica permisos locales restrictivos y redacta
 valores de credenciales del entorno. No publica reportes automáticamente.
 
@@ -119,6 +120,28 @@ ventana de contexto completa, la salida máxima, las repeticiones, los reintento
 el calentamiento. `--yes` no evita estos límites. Las reservas son acumulativas,
 se escriben de forma atómica y se conservan incluso si falla la ejecución. No son
 el gasto facturado: no se liberan automáticamente al terminar una prueba.
+Para presupuestos independientes por modelo, agrega `models` al registro privado:
+
+```json
+{
+  "limit_usd": 100,
+  "max_operation_usd": 100,
+  "reserved_usd": 0,
+  "models": {
+    "model-a": {"limit_usd": 25, "reserved_usd": 0},
+    "model-b": {"limit_usd": 25, "reserved_usd": 0},
+    "model-c": {"limit_usd": 25, "reserved_usd": 0},
+    "model-d": {"limit_usd": 25, "reserved_usd": 0}
+  },
+  "reservations": []
+}
+```
+
+Reemplaza los alias por las claves del catálogo. El preflight muestra la reserva por modelo,
+incluyendo calentamiento y reintentos. Un modelo no puede utilizar el saldo de otro;
+modelos sin presupuesto asignado se rechazan. Las reservas de varios modelos son atómicas.
+El total reservado debe coincidir con la suma de los saldos reservados por modelo.
+Al migrar un registro con consumo previo, conserva su historial y asigna también ese consumo.
 No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
 proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.
 La cota depende de precios y ventanas de contexto correctos; no controla consumos

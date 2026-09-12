@@ -20,7 +20,16 @@ def test_doctor_reasoning_budget_and_truncation(tmp_path, monkeypatch, finish, t
         "models:\n  sample:\n    input: 1\n    output: 1\n    last_verified: synthetic\n"
     )
     budget = tmp_path / "budget.json"
-    budget.write_text(json.dumps({"limit_usd": 1, "reserved_usd": 0, "max_operation_usd": 1}))
+    budget.write_text(
+        json.dumps(
+            {
+                "limit_usd": 1,
+                "reserved_usd": 0,
+                "max_operation_usd": 1,
+                "models": {"sample": {"limit_usd": 1, "reserved_usd": 0}},
+            }
+        )
+    )
     monkeypatch.setenv("TEST_BENCH_KEY", "synthetic-placeholder")
     captured = {}
 

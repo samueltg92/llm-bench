@@ -7,7 +7,7 @@ import typer
 from dotenv import load_dotenv
 
 from . import config
-from .budget import call_bound
+from .budget import amount, call_bound
 from .budget import reserve as reserve_budget
 from .experiment import execute, inputs, plan
 from .extract import extract as parse_export
@@ -72,12 +72,18 @@ def doctor(
     if online:
         if budget_file is None and env_file is None:
             raise typer.BadParameter("Online checks require --budget-file or --env-file")
-        bound = sum(
-            call_bound(m, prices.get(k), max_output_tokens)
+        allocations = {
+            k: call_bound(m, prices.get(k), max_output_tokens)
             for k, m in models.items()
             if m.enabled and os.environ.get(m.api_key_env)
-        )
-        reserve_budget(budget_file or env_file.parent / "budget.json", bound, "doctor")
+        }
+        if allocations:
+            reserve_budget(
+                budget_file or env_file.parent / "budget.json",
+                sum(allocations.values()),
+                "doctor",
+                allocations=allocations,
+            )
     rows = []
     for key, model in models.items():
         price = prices.get(key, {})
@@ -169,21 +175,24 @@ def run(
     pairs = inputs(data_dir, csv_list(projects), all_segments)
     preview = plan(pairs, selected, prices, bench, modes, dedup)
     reserve = None
+    allocations = {}
     if all(r["budget_reserve_usd"] is not None for r in preview):
-        reserve = sum(r["budget_reserve_usd"] for r in preview)
+        for row in preview:
+            key = row["model"]
+            allocations[key] = allocations.get(key, amount(0)) + amount(row["budget_reserve_usd"])
         if warmup and not offline_demo:
-            reserve += float(
-                sum(
+            for k, m in selected.items():
+                allocations[k] = allocations.get(k, amount(0)) + (
                     call_bound(m, prices.get(k), 512) * bench["retries"]["max_attempts"]
-                    for k, m in selected.items()
                 )
-            )
+        reserve = sum(allocations.values())
     emit(
         {
             "dry_run": True,
             "network_inference_calls": 0,
             "combinations": preview,
             "total_budget_reserve_usd": reserve,
+            "budget_reserve_by_model_usd": allocations,
             "includes_warmup_and_retries": True,
             "note": "Estimaciones con trayectoria e historial desconocidos; reserva conservadora con reintentos.",
         }
@@ -214,6 +223,7 @@ def run(
             budget_file or (env_file.parent if env_file else data_dir) / "budget.json",
             reserve,
             "benchmark",
+            allocations=allocations,
         )
     directory = execute(
         pairs, selected, prices, bench, modes, out or data_dir / "results", dedup, preview

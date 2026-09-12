@@ -244,6 +244,10 @@ def resolve_tool(call, bundle, scenario, active, variables, allowed_names, route
     started = time.perf_counter_ns()
     if reason:
         response = {"ok": False, "error": reason}
+    elif name == "route_node":
+        # Routing is local transport, not a backend fixture. Missing-backend
+        # defaults must never prevent a valid conversation transition.
+        response = {"ok": True, "active_node": bundle.node(active).name}
     elif mock.error:
         active = before
         response = {"ok": False, "error": "simulated_tool_failure"}
@@ -252,15 +256,13 @@ def resolve_tool(call, bundle, scenario, active, variables, allowed_names, route
             time.sleep(mock.delay_ms / 1000)
         variables.update(mock.state_updates)
         response = copy.deepcopy(mock.response)
-        if name == "route_node":
-            response = {"ok": True, "active_node": bundle.node(active).name}
     ended = time.perf_counter_ns()
     event = {
         "name": name,
         "arguments": arguments,
         "valid": reason is None,
         "error": reason,
-        "mock_error": mock.error and reason is None,
+        "mock_error": mock.error and reason is None and name != "route_node",
         "schema_verified": bool(tool and (not tool.synthetic or name == "route_node")),
         "duration_ms": (ended - started) / 1e6,
         "execution_mode": "mock",

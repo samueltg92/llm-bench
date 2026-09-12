@@ -29,11 +29,14 @@ def call_bound(model, price, output_tokens):
     )
 
 
-def reserve(path: Path, usd, purpose: str):
+def reserve(path: Path, usd, purpose: str, *, allocations: dict | None = None):
     import fcntl
 
     path = external_path(path)
     requested = amount(usd)
+    allocated = {key: amount(value) for key, value in (allocations or {}).items()}
+    if allocations is not None and sum(allocated.values()) != requested:
+        raise ValueError("Model allocations must equal the operation reservation")
     # A missing/corrupt ledger fails closed; never silently reset prior spending.
     if not path.is_file():
         raise ValueError("A private budget ledger is required before online calls")
@@ -49,12 +52,29 @@ def reserve(path: Path, usd, purpose: str):
             raise ValueError("Operation exceeds the private per-operation budget")
         if reserved + requested > limit:
             raise ValueError("Operation exceeds the remaining cumulative budget")
+        pools = state.get("models")
+        if pools is not None:
+            if not allocated:
+                raise ValueError("Per-model budget requires explicit model allocations")
+            if sum(amount(pool["reserved_usd"]) for pool in pools.values()) != reserved:
+                raise ValueError("Inconsistent cumulative and per-model budget")
+            for key, value in allocated.items():
+                if key not in pools:
+                    raise ValueError("Model has no authorized budget")
+                pool = pools[key]
+                if amount(pool["reserved_usd"]) + value > amount(pool["limit_usd"]):
+                    raise ValueError(f"Operation exceeds the remaining model budget: {key}")
+            # Validate every allocation before mutating any pool (all or nothing).
+            for key, value in allocated.items():
+                pools[key]["reserved_usd"] = str(amount(pools[key]["reserved_usd"]) + value)
         entry = {
             "id": uuid.uuid4().hex,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "purpose": purpose,
             "reserved_usd": str(requested),
         }
+        if allocated:
+            entry["models"] = {key: str(value) for key, value in allocated.items()}
         state["reserved_usd"] = str(reserved + requested)
         state.setdefault("reservations", []).append(entry)
         temp_fd, temp_path = tempfile.mkstemp(prefix=".budget-", dir=path.parent)

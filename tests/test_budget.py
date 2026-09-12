@@ -75,7 +75,9 @@ def test_yes_cannot_bypass_budget_before_benchmark_execution(tmp_path, monkeypat
 
     path = ledger(tmp_path, per_operation=".25")
     monkeypatch.setattr("llm_bench.cli.inputs", lambda *args: [])
-    monkeypatch.setattr("llm_bench.cli.plan", lambda *args: [{"budget_reserve_usd": 0.5}])
+    monkeypatch.setattr(
+        "llm_bench.cli.plan", lambda *args: [{"model": "sample", "budget_reserve_usd": 0.5}]
+    )
     monkeypatch.setattr(
         "llm_bench.cli.config.models",
         lambda *args: {"sample": Model(provider="fake", model_id="sample")},
@@ -94,3 +96,71 @@ def test_yes_cannot_bypass_budget_before_benchmark_execution(tmp_path, monkeypat
     assert result.exit_code != 0
     assert "per-operation" in str(result.exception)
     assert json.loads(path.read_text())["reserved_usd"] == 0
+
+
+def scoped_ledger(tmp_path):
+    path = ledger(tmp_path, limit=100, per_operation=100)
+    state = json.loads(path.read_text())
+    state["models"] = {
+        key: {"limit_usd": "25", "reserved_usd": "0"}
+        for key in ("model-a", "model-b", "model-c", "model-d")
+    }
+    path.write_text(json.dumps(state))
+    return path
+
+
+def test_model_cannot_borrow_other_models_balance(tmp_path):
+    path = scoped_ledger(tmp_path)
+    reserve(path, 25, "test", allocations={"model-a": 25})
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="remaining model"):
+        reserve(path, 1, "test", allocations={"model-a": 1})
+    assert path.read_bytes() == before
+    reserve(path, 25, "test", allocations={"model-b": 25})
+    assert amount_from_file(path) == Decimal("50")
+
+
+def amount_from_file(path):
+    return Decimal(json.loads(path.read_text())["reserved_usd"])
+
+
+@pytest.mark.parametrize("allocations", [None, {"unknown": 1}, {"model-a": 2}])
+def test_scoped_budget_rejects_missing_unknown_or_mismatched_allocation(tmp_path, allocations):
+    path = scoped_ledger(tmp_path)
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        reserve(path, 1, "test", allocations=allocations)
+    assert path.read_bytes() == before
+
+
+def test_multimodel_reservation_is_atomic(tmp_path):
+    path = scoped_ledger(tmp_path)
+    reserve(path, 25, "test", allocations={"model-b": 25})
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        reserve(path, 2, "test", allocations={"model-a": 1, "model-b": 1})
+    assert path.read_bytes() == before
+
+
+def test_concurrent_model_reservations_are_serialized(tmp_path):
+    path = scoped_ledger(tmp_path)
+
+    def attempt(_):
+        try:
+            reserve(path, 10, "test", allocations={"model-a": 10})
+            return True
+        except ValueError:
+            return False
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        assert sum(pool.map(attempt, range(4))) == 2
+    assert amount_from_file(path) == Decimal("20")
+
+
+def test_inconsistent_model_totals_fail_closed(tmp_path):
+    path = scoped_ledger(tmp_path)
+    state = json.loads(path.read_text())
+    state["models"]["model-a"]["reserved_usd"] = "1"
+    path.write_text(json.dumps(state))
+    with pytest.raises(ValueError, match="Inconsistent"):
+        reserve(path, 1, "test", allocations={"model-a": 1})

@@ -108,6 +108,21 @@ def test_same_canonical_input_across_adapters(bundle, scenario, model):
     assert tools == [] and messages[0]["role"] == "user"
 
 
+def test_unavailable_backend_default_does_not_break_local_routing(bundle, scenario):
+    scenario.default_mock.error = True
+    after, response, event = resolve_tool(
+        call("route_node", {"target_node": "Consulta"}),
+        bundle,
+        scenario,
+        "start",
+        {},
+        {"route_node"},
+    )
+    assert after == "query"
+    assert response == {"ok": True, "active_node": "Consulta"}
+    assert event["valid"] and not event["mock_error"]
+
+
 def test_dry_plan_never_creates_provider(bundle, scenario, model, bench, monkeypatch):
     monkeypatch.setattr("llm_bench.experiment.create", lambda *a: pytest.fail("network client"))
     rows = plan([(bundle, scenario)], {"fake": model}, {}, bench, ["full", "active_node"])

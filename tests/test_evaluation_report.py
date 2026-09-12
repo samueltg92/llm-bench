@@ -65,3 +65,43 @@ def test_partial_error_keeps_transcript_and_failed_assertions(
     assert row["rule_compliance"] == 0
     assert row["conversation_cost_usd"] is None
     assert list((tmp_path / "transcripts").glob("*.json"))
+
+
+def test_private_conversation_review_preserves_dialogue_and_tools(tmp_path):
+    import json
+
+    from llm_bench.report import conversation_review
+
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    (folder / "sample.json").write_text(
+        json.dumps(
+            {
+                "scenario": "example",
+                "model_key": "sample",
+                "history": [
+                    {"role": "user", "content": "¿Puedes consultar?"},
+                    {
+                        "role": "assistant",
+                        "content": "Un momento.",
+                        "reasoning_content": "INTERNAL_ANALYSIS",
+                        "tool_calls": [{"function": {"name": "consultar", "arguments": "{}"}}],
+                    },
+                    {"role": "tool", "content": '{"ok": true}'},
+                    {"role": "assistant", "content": "<script>unsafe()</script>"},
+                ],
+                "summary": {"routing_path": ["Inicio", "Consulta"]},
+            }
+        )
+    )
+    conversation_review(tmp_path)
+    output = (tmp_path / "CONVERSATIONS.md").read_text()
+    assert (
+        output.index("¿Puedes consultar?")
+        < output.index("Un momento.")
+        < output.index('&quot;name&quot;: &quot;consultar&quot;')
+    )
+    assert "consultar" in output and "Resultado simulado" in output
+    assert "INTERNAL_ANALYSIS" not in output
+    assert "<script>" not in output and "&lt;script&gt;" in output
+    assert "routing_path" in output

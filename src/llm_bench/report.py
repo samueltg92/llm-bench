@@ -130,6 +130,54 @@ def table(rows, fields):
     )
 
 
+def conversation_review(run_dir: Path):
+    """Readable private dialogue; keep model reasoning out of the spoken transcript."""
+    run_dir = external_path(run_dir)
+    sections = [
+        "# Conversaciones — revisión privada",
+        "No publicar. Las respuestas de herramientas son simuladas; no verifican datos reales.",
+    ]
+    for path in sorted((run_dir / "transcripts").glob("*.json")):
+        item = json.loads(path.read_text())
+        sections.extend(
+            [
+                f"## {item.get('scenario', '')} / {item.get('model_key', '')}",
+                f"Registro original: transcripts/{path.name}",
+            ]
+        )
+        for message in item.get("history", []):
+            role = message.get("role")
+            if role == "system":
+                continue
+            label = {
+                "user": "Usuario simulado",
+                "assistant": "LLM",
+                "tool": "Resultado simulado",
+            }.get(role, role)
+            sections.append(f"### {label}")
+            # Quoted lines preserve the conversation and prevent Markdown/HTML in
+            # generated content from masquerading as report structure.
+            import html
+
+            content = message.get("content") or ""
+            sections.append("<pre>" + html.escape(str(content)) + "</pre>")
+            for tool in message.get("tool_calls", []):
+                sections.append(
+                    "<pre>"
+                    + html.escape(json.dumps(tool.get("function", {}), ensure_ascii=False))
+                    + "</pre>"
+                )
+        sections.extend(
+            [
+                "### Métricas, recorrido y comprobaciones",
+                "```json\n"
+                + json.dumps(item.get("summary", {}), ensure_ascii=False, indent=2)
+                + "\n```",
+            ]
+        )
+    write_private(run_dir / "CONVERSATIONS.md", "\n\n".join(sections), plain=True)
+
+
 def report(run_dir: Path):
     run_dir = external_path(run_dir)
     runs = read_lines(run_dir / "runs.jsonl")
@@ -253,6 +301,7 @@ def report(run_dir: Path):
         f"Calentamientos registrados y excluidos: {len(warmups)}. Costo conocido: {cell(total_known(c.get('cost_usd') for c in warmups))} USD."
     )
     write_private(run_dir / "REPORT.md", "\n\n".join(sections), plain=True)
+    conversation_review(run_dir)
     return rows
 
 
