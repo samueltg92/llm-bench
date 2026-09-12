@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
-from .budget import call_bound
+from .budget import ReservedProvider, call_bound
 from .bundle import Bundle
 from .pricing import calculate
 from .privacy import external_path, fingerprint, write_private
@@ -135,7 +135,9 @@ def plan(pairs, models, prices, bench, modes, dedup=False):
     return rows
 
 
-def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=None):
+def execute(
+    pairs, models, prices, bench, modes, out, dedup=False, preflight=None, reservation=None
+):
     out = external_path(out)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ") + "-" + uuid.uuid4().hex[:8]
     directory = out / stamp
@@ -163,6 +165,8 @@ def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=Non
         "preflight": preflight,
         "token_estimator": "o200k_base",
         "tools_execution": "mock",
+        "execution_complete": False,
+        "budget_reservation_id": reservation["id"] if reservation else None,
         "scenarios": [
             {
                 "id": s.id,
@@ -181,10 +185,13 @@ def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=Non
         ],
     }
     write_private(directory / "manifest.json", manifest)
+    budget_usage = {}
 
     def run_model(item):
         key, model = item
         provider = create(model, bench["timeouts"])
+        if reservation:
+            provider = ReservedProvider(provider, model, prices[key], reservation["models"][key])
         provider.min_request_interval_s = max(0, float(bench.get("min_request_interval_s", 0)))
         try:
             if bench.get("warmup", True):
@@ -229,6 +236,11 @@ def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=Non
                     )
         finally:
             provider.close()
+            if reservation:
+                budget_usage[key] = {
+                    "attempts": provider.attempts,
+                    "retained_usd": str(provider.retained),
+                }
 
     if bench["concurrency"] == 1:
         for item in models.items():
@@ -247,5 +259,7 @@ def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=Non
     manifest["system_sha256"] = sorted(
         {c["system_sha256"] for c in recorded if "system_sha256" in c}
     )
+    manifest["execution_complete"] = True
+    manifest["budget_usage"] = budget_usage
     write_private(directory / "manifest.json", manifest)
     return directory

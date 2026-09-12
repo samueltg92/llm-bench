@@ -139,9 +139,13 @@ o indicado con `--budget-file`. Ejemplo de presupuesto inicial para un piloto:
 
 El registro reserva una cota conservadora antes de llamar a proveedores, usando la
 ventana de contexto completa, la salida máxima, las repeticiones, los reintentos y
-el calentamiento. `--yes` no evita estos límites. Las reservas son acumulativas,
-se escriben de forma atómica y se conservan incluso si falla la ejecución. No son
-el gasto facturado: no se liberan automáticamente al terminar una prueba.
+el calentamiento. `--yes` no evita estos límites. Las reservas se escriben de forma
+atómica. Una ejecución terminada libera solo capacidad de llamadas que no utilizó;
+cada intento realizado, incluso fallido, conserva su cota completa sin descuento de caché.
+El contador aumenta antes de iniciar la petición. Las ejecuciones interrumpidas y
+los registros antiguos sin evidencia de finalización conservan su reserva original.
+La conciliación conserva el historial y es idempotente. Estos montos siguen siendo
+cotas prudenciales, no gasto facturado.
 Para presupuestos independientes por modelo, agrega `models` al registro privado:
 
 ```json

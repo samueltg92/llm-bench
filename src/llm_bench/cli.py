@@ -7,7 +7,7 @@ import typer
 from dotenv import load_dotenv
 
 from . import config
-from .budget import amount, call_bound
+from .budget import amount, call_bound, settle_completed
 from .budget import reserve as reserve_budget
 from .experiment import execute, inputs, plan
 from .extract import extract as parse_export
@@ -218,16 +218,21 @@ def run(
         )
     if reserve > bench["cost_guard_usd"] and not yes:
         typer.confirm(f"Reserva estimada conservadora: USD {reserve:.2f}. ¿Ejecutar?", abort=True)
+    reservation = None
+    ledger_path = budget_file or (env_file.parent if env_file else data_dir) / "budget.json"
     if not offline_demo:
-        reserve_budget(
-            budget_file or (env_file.parent if env_file else data_dir) / "budget.json",
+        reservation = reserve_budget(
+            ledger_path,
             reserve,
             "benchmark",
             allocations=allocations,
         )
     directory = execute(
-        pairs, selected, prices, bench, modes, out or data_dir / "results", dedup, preview
+        pairs, selected, prices, bench, modes, out or data_dir / "results", dedup, preview,
+        reservation=reservation,
     )
+    if reservation:
+        settle_completed(ledger_path, directory)
     rows = make_report(directory)
     emit({"run_dir": str(directory), "report_rows": len(rows), "synthetic": offline_demo})
 
