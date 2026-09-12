@@ -7,6 +7,8 @@ import typer
 from dotenv import load_dotenv
 
 from . import config
+from .budget import call_bound
+from .budget import reserve as reserve_budget
 from .experiment import execute, inputs, plan
 from .extract import extract as parse_export
 from .extract import save_bundle
@@ -55,12 +57,27 @@ def extract(
 
 
 @app.command()
-def doctor(config_dir: Path = Path("config"), env_file: Path | None = None, online: bool = False):
+def doctor(
+    config_dir: Path = Path("config"),
+    env_file: Path | None = None,
+    online: bool = False,
+    max_output_tokens: Annotated[int, typer.Option(min=1)] = 512,
+    budget_file: Path | None = None,
+):
     """Valida configuración; --online hace una inferencia breve con texto sintético."""
     if env_file:
         load_dotenv(external_path(env_file), override=False)
     models = config.models(config_dir / "models.yaml")
     prices = config.yaml_data(config_dir / "pricing.yaml")["models"]
+    if online:
+        if budget_file is None and env_file is None:
+            raise typer.BadParameter("Online checks require --budget-file or --env-file")
+        bound = sum(
+            call_bound(m, prices.get(k), max_output_tokens)
+            for k, m in models.items()
+            if m.enabled and os.environ.get(m.api_key_env)
+        )
+        reserve_budget(budget_file or env_file.parent / "budget.json", bound, "doctor")
     rows = []
     for key, model in models.items():
         price = prices.get(key, {})
@@ -82,12 +99,17 @@ def doctor(config_dir: Path = Path("config"), env_file: Path | None = None, onli
                         messages=[{"role": "user", "content": "Di hola."}],
                         tools=[],
                         temperature=0.2,
-                        max_output_tokens=5,
+                        max_output_tokens=max_output_tokens,
                     )
                 )
-                row["online_status"] = (
-                    "ok" if any(e.kind == "text" and e.text for e in events) else "empty"
-                )
+                finish = next((e.finish_reason for e in reversed(events) if e.kind == "done"), None)
+                row["finish_reason"] = finish
+                if finish in {"length", "MAX_TOKENS", "FinishReason.MAX_TOKENS"}:
+                    row["online_status"] = "output_limit"
+                else:
+                    row["online_status"] = (
+                        "ok" if any(e.kind == "text" and e.text for e in events) else "empty"
+                    )
             except Exception as exc:
                 row["online_status"] = type(exc).__name__
             finally:
@@ -114,6 +136,7 @@ def run(
     out: Path | None = None,
     yes: bool = False,
     offline_demo: bool = False,
+    budget_file: Path | None = None,
 ):
     """Simula conversaciones completas; active_node recorre el grafo conservando historial."""
     if env_file:
@@ -145,11 +168,23 @@ def run(
         prices["offline-fake"] = {"input": 0, "output": 0, "last_verified": "synthetic"}
     pairs = inputs(data_dir, csv_list(projects), all_segments)
     preview = plan(pairs, selected, prices, bench, modes, dedup)
+    reserve = None
+    if all(r["budget_reserve_usd"] is not None for r in preview):
+        reserve = sum(r["budget_reserve_usd"] for r in preview)
+        if warmup and not offline_demo:
+            reserve += float(
+                sum(
+                    call_bound(m, prices.get(k), 512) * bench["retries"]["max_attempts"]
+                    for k, m in selected.items()
+                )
+            )
     emit(
         {
             "dry_run": True,
             "network_inference_calls": 0,
             "combinations": preview,
+            "total_budget_reserve_usd": reserve,
+            "includes_warmup_and_retries": True,
             "note": "Estimaciones con trayectoria e historial desconocidos; reserva conservadora con reintentos.",
         }
     )
@@ -172,9 +207,14 @@ def run(
         raise typer.BadParameter(
             "Hay precios desconocidos: completa pricing.yaml antes de inferencia"
         )
-    reserve = sum(r["budget_reserve_usd"] for r in preview)
     if reserve > bench["cost_guard_usd"] and not yes:
         typer.confirm(f"Reserva estimada conservadora: USD {reserve:.2f}. ¿Ejecutar?", abort=True)
+    if not offline_demo:
+        reserve_budget(
+            budget_file or (env_file.parent if env_file else data_dir) / "budget.json",
+            reserve,
+            "benchmark",
+        )
     directory = execute(
         pairs, selected, prices, bench, modes, out or data_dir / "results", dedup, preview
     )

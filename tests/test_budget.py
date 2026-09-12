@@ -1,0 +1,96 @@
+import json
+from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
+
+import pytest
+
+from llm_bench.budget import call_bound, reserve
+from llm_bench.config import Model
+
+
+def ledger(tmp_path, limit=1, per_operation=1):
+    path = tmp_path / "budget.json"
+    path.write_text(
+        json.dumps({"limit_usd": limit, "reserved_usd": 0, "max_operation_usd": per_operation})
+    )
+    return path
+
+
+def test_reservations_persist_and_cannot_exceed_total(tmp_path):
+    path = ledger(tmp_path)
+    reserve(path, "0.75", "test")
+    with pytest.raises(ValueError, match="cumulative"):
+        reserve(path, "0.26", "test")
+    assert Decimal(json.loads(path.read_text())["reserved_usd"]) == Decimal("0.75")
+    reserve(path, "0.25", "test")
+    with pytest.raises(ValueError):
+        reserve(path, "0.000001", "test")
+
+
+def test_operation_limit_and_missing_ledger_fail_closed(tmp_path):
+    path = ledger(tmp_path, limit=25, per_operation="0.25")
+    with pytest.raises(ValueError, match="per-operation"):
+        reserve(path, "0.26", "test")
+    assert json.loads(path.read_text())["reserved_usd"] == 0
+    with pytest.raises(ValueError, match="required"):
+        reserve(tmp_path / "missing.json", 0.1, "test")
+
+
+def test_concurrent_reservations_do_not_double_spend(tmp_path):
+    path = ledger(tmp_path)
+
+    def attempt(_):
+        try:
+            reserve(path, ".4", "test")
+            return True
+        except ValueError:
+            return False
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        accepted = list(pool.map(attempt, range(4)))
+    assert sum(accepted) == 2
+    assert Decimal(json.loads(path.read_text())["reserved_usd"]) == Decimal(".8")
+
+
+def test_upper_bound_does_not_discount_cached_input():
+    model = Model(provider="openai_compat", model_id="synthetic", context_window=1000)
+    assert call_bound(
+        model, {"input": 1, "output": 2, "cached_input": 0, "last_verified": "synthetic"}, 100
+    ) == Decimal(".0012")
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-1"])
+def test_invalid_amount_does_not_change_ledger(tmp_path, value):
+    path = ledger(tmp_path)
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        reserve(path, value, "test")
+    assert path.read_bytes() == before
+
+
+def test_yes_cannot_bypass_budget_before_benchmark_execution(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from llm_bench.cli import app
+
+    path = ledger(tmp_path, per_operation=".25")
+    monkeypatch.setattr("llm_bench.cli.inputs", lambda *args: [])
+    monkeypatch.setattr("llm_bench.cli.plan", lambda *args: [{"budget_reserve_usd": 0.5}])
+    monkeypatch.setattr(
+        "llm_bench.cli.config.models",
+        lambda *args: {"sample": Model(provider="fake", model_id="sample")},
+    )
+    monkeypatch.setattr(
+        "llm_bench.cli.config.yaml_data", lambda *args: {"models": {}, "cost_guard_usd": 0.1}
+    )
+    monkeypatch.setattr(
+        "llm_bench.cli.execute",
+        lambda *args: pytest.fail("Budget rejection must precede execution"),
+    )
+    result = CliRunner().invoke(
+        app,
+        ["run", "--data-dir", str(tmp_path), "--budget-file", str(path), "--no-warmup", "--yes"],
+    )
+    assert result.exit_code != 0
+    assert "per-operation" in str(result.exception)
+    assert json.loads(path.read_text())["reserved_usd"] == 0

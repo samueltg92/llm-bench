@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
+from .budget import call_bound
 from .bundle import Bundle
 from .pricing import calculate
 from .privacy import external_path, fingerprint, write_private
@@ -87,14 +88,13 @@ def plan(pairs, models, prices, bench, modes, dedup=False):
                 source="estimated",
             )
             estimate = calculate(usage, prices.get(key))
-            # Every permitted attempt is checked against this context cap before submission.
-            bound = Usage(
-                prompt_tokens=int(model.context_window * bench.get("context_skip_ratio", 0.95))
-                * call_count,
-                completion_tokens=call_count * scenario.max_output_tokens,
-                source="estimated",
-            )
-            bound_cost = calculate(bound, prices.get(key))["cost_usd"]
+            try:
+                bound_cost = (
+                    float(call_bound(model, prices.get(key), scenario.max_output_tokens))
+                    * call_count
+                )
+            except (ValueError, TypeError, KeyError):
+                bound_cost = None
             reps = bench["repetitions"]
             rows.append(
                 {
@@ -178,7 +178,7 @@ def execute(pairs, models, prices, bench, modes, out, dedup=False, preflight=Non
                     id="warmup",
                     project="project_1",
                     turns=[{"content": "Hola"}],
-                    max_output_tokens=5,
+                    max_output_tokens=512,
                 )
                 row, _, _ = measure(
                     provider,

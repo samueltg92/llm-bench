@@ -107,6 +107,25 @@ cotización exacta: el historial, caché y ruta todavía no se conocen. Sobre US
 o `--yes`. Precios desconocidos bloquean inferencia. `doctor --online` realiza pruebas breves
 pagables con un saludo ficticio; el modo predeterminado de doctor no llama APIs.
 
+Las operaciones online requieren además un `budget.json` privado, junto al `.env`
+o indicado con `--budget-file`. Ejemplo de presupuesto inicial para un piloto:
+
+```json
+{"limit_usd": 1, "max_operation_usd": 0.25, "reserved_usd": 0, "reservations": []}
+```
+
+El registro reserva una cota conservadora antes de llamar a proveedores, usando la
+ventana de contexto completa, la salida máxima, las repeticiones, los reintentos y
+el calentamiento. `--yes` no evita estos límites. Las reservas son acumulativas,
+se escriben de forma atómica y se conservan incluso si falla la ejecución. No son
+el gasto facturado: no se liberan automáticamente al terminar una prueba.
+No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
+proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.
+La cota depende de precios y ventanas de contexto correctos; no controla consumos
+externos a esta CLI, impuestos ni cambios de tarifas del proveedor.
+`doctor --online --max-output-tokens 512` permite margen para modelos que razonan;
+una respuesta truncada se informa como `output_limit`.
+
 Gemma está deshabilitado inicialmente porque la oferta gratuita declara uso de datos para
 mejorar productos. Revisa las condiciones del servicio antes de habilitarlo con datos privados.
 Las verificaciones documentales y las pruebas de conectividad son distintas; estas últimas
