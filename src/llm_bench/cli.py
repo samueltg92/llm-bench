@@ -233,6 +233,35 @@ def run(
 
 
 @app.command()
+def audit_context(
+    data_dir: Annotated[Path, typer.Option(exists=True)],
+    out: Annotated[Path, typer.Option()],
+    config_dir: Path = Path("config"),
+    results_dir: Path | None = None,
+    projects: str = "",
+    models: str = "",
+):
+    """Audita contexto publicado, tamaño estimado y evidencia previa; sin inferencias."""
+    from .context import audit
+
+    catalog = config.models(config_dir / "models.yaml")
+    requested = csv_list(models)
+    if set(requested) - set(catalog):
+        raise typer.BadParameter("Modelo desconocido")
+    selected = {k: m for k, m in catalog.items() if k in requested or (not requested and m.enabled)}
+    pairs = inputs(data_dir, csv_list(projects), all_segments=True)
+    rows = audit(
+        pairs,
+        selected,
+        config.yaml_data(config_dir / "pricing.yaml")["models"],
+        config.yaml_data(config_dir / "bench.yaml"),
+        out,
+        results_dir,
+    )
+    emit({"network_calls": 0, "comparisons": len(rows), "report": str(out / "CONTEXT.md")})
+
+
+@app.command()
 def report(run_dir: Annotated[Path, typer.Option(exists=True)], format: str = "all"):
     """Regenera CSV e informe Markdown privados."""
     if format not in ("all", "table", "csv", "md"):

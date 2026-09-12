@@ -96,6 +96,28 @@ en texto, reintentos y datos sintéticos. No mezcles escenarios distintos al ele
 El hash canónico ayuda a verificar igualdad de instrucciones; el hash del request también
 incluye el historial, que puede divergir entre modelos.
 
+## Compatibilidad de contexto
+
+La auditoría local compara el tamaño estimado de los prompts con la ventana configurada por
+despliegue, reserva espacio para la salida y muestra evidencia de tamaños ya procesados:
+
+```sh
+uv run --no-editable vbench audit-context --data-dir ../bench-private --out ../bench-private/context-review --results-dir ../bench-private/results
+```
+
+No hace inferencias. Escribe `CONTEXT.md` y `context-audit.json` privados y contrasta
+`active_node` con `full`; los segmentos independientes se mantienen separados. Los modelos
+deshabilitados pueden incluirse explícitamente con `--models` para auditar sus límites sin llamarlos.
+
+El historial se comprueba otra vez antes de cada llamada, incluso después de resultados grandes
+de herramientas. No se recorta automáticamente. `skipped_context` también puede indicar que se
+agotó el margen preventivo configurado, aunque no se haya alcanzado la ventana publicada.
+
+El conteo entre modelos es aproximado. `usage` del proveedor permite documentar tamaños
+procesados; no prueba por sí solo que la ventana completa funcione ni que el proveedor no haya
+recortado internamente. La retención de información, las reglas y las tools se evalúan aparte.
+Los límites de tokens por minuto de la cuenta tampoco equivalen a la ventana del modelo.
+
 ## Modelos, precios y gasto
 
 El catálogo está en `config/models.yaml`; tarifas USD por millón de tokens en `config/pricing.yaml`.

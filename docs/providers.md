@@ -26,3 +26,15 @@ que se enviarán. No se usa automáticamente un modelo distinto cuando falta una
 
 GPT-4.1 es una referencia opcional deshabilitada, con precio pendiente. Agrega otra entrada si
 necesitas comparar el mismo modelo en otro proveedor: registra su endpoint, tarifas y opciones.
+
+## Contexto: capacidad publicada y evidencia de la cuenta
+
+Las ventanas de esta tabla se verificaron de nuevo el 2026-09-12. Son límites documentados,
+no resultados de una prueba que haya llenado toda la ventana. Groq documenta además un máximo
+de salida de 65536 tokens; Z.ai documenta 128K de salida para esta variante. La salida reservada
+forma parte del control de compatibilidad y del presupuesto de cada petición.
+
+La cuota efectiva de la cuenta y las restricciones del servicio pueden impedir una petición
+que sí cabe en la ventana del modelo. Usa la auditoría local y los registros de `usage` para
+separar esos límites. Un error de cuota, una salida truncada y un exceso de contexto son
+condiciones diferentes; ninguna prueba parcial certifica por sí sola la capacidad máxima.

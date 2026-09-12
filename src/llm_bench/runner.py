@@ -360,6 +360,9 @@ def conversation(
                     "active_node_before": active,
                     "context_est_tokens": budget,
                     "context_ratio": budget / model.context_window,
+                    "context_window_tokens": model.context_window,
+                    "max_output_tokens": scenario.max_output_tokens,
+                    "context_estimator": "o200k_base_cross_model_estimate",
                     "warmup": False,
                     **hashes,
                 }
@@ -393,6 +396,13 @@ def conversation(
                     bench["retries"],
                     hashes["tool_mode"],
                 )
+                if row.get("usage_source") == "provider" and row.get("prompt_tokens") is not None:
+                    row["provider_reported_input_ratio"] = (
+                        row["prompt_tokens"] / model.context_window
+                    )
+                    row["provider_reported_input_plus_output_budget"] = (
+                        row["prompt_tokens"] + scenario.max_output_tokens
+                    )
                 if (
                     row["status"] == "empty_response"
                     and row["finish_reason"] == "stop"

@@ -111,6 +111,14 @@ def plan(pairs, models, prices, bench, modes, dedup=False):
                     "enabled": model.enabled,
                     "initial_prompt_tokens_est": initial_tokens,
                     "largest_prompt_tokens_est": max_tokens,
+                    "context_window_tokens": model.context_window,
+                    "reserved_output_tokens": scenario.max_output_tokens,
+                    "largest_prompt_context_status": context_status(
+                        max_tokens + scenario.max_output_tokens, model.context_window, bench
+                    ),
+                    "largest_prompt_headroom_tokens_est": (
+                        model.context_window - max_tokens - scenario.max_output_tokens
+                    ),
                     "context_status": context_status(
                         initial_tokens + scenario.max_output_tokens, model.context_window, bench
                     ),
