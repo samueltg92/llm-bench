@@ -1,0 +1,65 @@
+models:
+  mistral-small-4:
+    enabled: true
+    provider: openai_compat
+    base_url: https://api.mistral.ai/v1
+    model_id: mistral-small-2603
+    api_key_env: MISTRAL_API_KEY
+    context_window: 256000
+    supports_system: true
+    supports_tools: true
+    include_usage: false
+    source_url: https://docs.mistral.ai/models/mistral-small-4-0-26-03
+    last_verified: '2026-09-12'
+  gpt-oss-120b:
+    enabled: true
+    provider: openai_compat
+    base_url: https://api.groq.com/openai/v1
+    model_id: openai/gpt-oss-120b
+    api_key_env: GROQ_API_KEY
+    context_window: 131072
+    supports_system: true
+    supports_tools: true
+    extra: {reasoning_effort: low}
+    source_url: https://console.groq.com/docs/model/openai/gpt-oss-120b
+    last_verified: '2026-09-12'
+    # Alternate deployments need separate model keys and provider-specific prices.
+    # Together: https://api.together.xyz/v1
+    # Fireworks: https://api.fireworks.ai/inference/v1
+    # Cerebras: https://api.cerebras.ai/v1
+    # OpenRouter: https://openrouter.ai/api/v1
+  gemma-4-31b:
+    enabled: false
+    provider: google_genai
+    model_id: gemma-4-31b-it
+    api_key_env: GOOGLE_API_KEY
+    context_window: 256000
+    supports_system: true
+    supports_tools: true
+    source_url: https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api
+    last_verified: '2026-09-12'
+    data_policy: free_tier_product_improvement
+    notes: Hosted API supports system/tools. Disabled because the free tier uses data for product improvement; review suitability for private inputs before enabling.
+  glm-5.3-flash:
+    enabled: true
+    provider: openai_compat
+    base_url: https://api.z.ai/api/paas/v4
+    model_id: glm-5.3-flash
+    api_key_env: ZAI_API_KEY
+    context_window: 1000000
+    extra:
+      extra_body:
+        tool_stream: true
+        thinking: {type: enabled, clear_thinking: false}
+    source_url: https://docs.z.ai/guides/vlm/glm-5.3-flash
+    last_verified: '2026-09-12'
+    notes: Thinking cannot be disabled. Context uses conservative decimal 1M interpretation. Reasoning settings are recorded with each experiment.
+  gpt-4.1:
+    enabled: false
+    provider: openai_compat
+    base_url: https://api.openai.com/v1
+    model_id: gpt-4.1
+    api_key_env: OPENAI_API_KEY
+    context_window: 1047576
+    last_verified: PENDING
+    notes: Optional baseline. Verify current pricing before enabling.

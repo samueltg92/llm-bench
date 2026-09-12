@@ -1,0 +1,31 @@
+# USD per million tokens. Unknown is null, never zero.
+models:
+  mistral-small-4:
+    input: 0.15
+    output: 0.60
+    cached_input: null
+    last_verified: '2026-09-12'
+    source_url: https://docs.mistral.ai/models/mistral-small-4-0-26-03
+  gpt-oss-120b:
+    input: 0.15
+    output: 0.60
+    cached_input: 0.075
+    last_verified: '2026-09-12'
+    source_url: https://console.groq.com/docs/model/openai/gpt-oss-120b
+  gemma-4-31b:
+    input: 0.0
+    output: 0.0
+    cached_input: 0.0
+    last_verified: '2026-09-12'
+    source_url: https://ai.google.dev/gemini-api/docs/pricing
+  glm-5.3-flash:
+    input: 0.15
+    output: 0.50
+    cached_input: 0.03
+    last_verified: '2026-09-12'
+    source_url: https://docs.z.ai/guides/overview/pricing
+  gpt-4.1:
+    input: null
+    output: null
+    last_verified: PENDING
+    source_url: https://developers.openai.com/api/docs/pricing

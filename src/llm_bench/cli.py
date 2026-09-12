@@ -1,0 +1,200 @@
+import json
+import os
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from dotenv import load_dotenv
+
+from . import config
+from .experiment import execute, inputs, plan
+from .extract import extract as parse_export
+from .extract import save_bundle
+from .privacy import external_path, write_private
+from .report import compare as comparisons
+from .report import report as make_report
+
+app = typer.Typer(
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    help="Benchmark conversacional de LLM con datos privados fuera de Git.",
+)
+
+
+def csv_list(value):
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def emit(value):
+    typer.echo(json.dumps(value, ensure_ascii=False, default=str, indent=2))
+
+
+@app.command()
+def extract(
+    input: Annotated[Path, typer.Option(exists=True)],
+    project: Annotated[str, typer.Option(help="Alias genérico: project_1")],
+    out: Annotated[Path, typer.Option()],
+    composition: str | None = None,
+):
+    """Importa un JSON privado; nunca escribe datos en un working tree Git."""
+    if composition not in (None, "all_nodes", "single_node"):
+        raise typer.BadParameter("composition debe ser all_nodes o single_node")
+    external_path(out)
+    bundle = parse_export(input, project, composition)
+    save_bundle(bundle, out)
+    index_path = out / "_index.json"
+    index = json.loads(index_path.read_text()) if index_path.exists() else {}
+    index[project] = {
+        "project": project,
+        "composition": bundle.composition,
+        **bundle.stats,
+        "warnings_count": len(bundle.warnings),
+    }
+    write_private(index_path, index)
+    emit(index[project])
+
+
+@app.command()
+def doctor(config_dir: Path = Path("config"), env_file: Path | None = None, online: bool = False):
+    """Valida configuración; --online hace una inferencia breve con texto sintético."""
+    if env_file:
+        load_dotenv(external_path(env_file), override=False)
+    models = config.models(config_dir / "models.yaml")
+    prices = config.yaml_data(config_dir / "pricing.yaml")["models"]
+    rows = []
+    for key, model in models.items():
+        price = prices.get(key, {})
+        row = {
+            "model": key,
+            "enabled": model.enabled,
+            "credential_present": bool(os.environ.get(model.api_key_env)),
+            "price_verified": price.get("last_verified") not in (None, "PENDING", "PENDIENTE"),
+            "configuration_verified": model.last_verified not in ("PENDING", "PENDIENTE"),
+            "online_status": "not_requested",
+        }
+        if online and model.enabled and row["credential_present"]:
+            from .providers.registry import create
+
+            provider = create(model)
+            try:
+                events = list(
+                    provider.stream_chat(
+                        messages=[{"role": "user", "content": "Di hola."}],
+                        tools=[],
+                        temperature=0.2,
+                        max_output_tokens=5,
+                    )
+                )
+                row["online_status"] = (
+                    "ok" if any(e.kind == "text" and e.text for e in events) else "empty"
+                )
+            except Exception as exc:
+                row["online_status"] = type(exc).__name__
+            finally:
+                provider.close()
+        rows.append(row)
+    emit(rows)
+
+
+@app.command()
+def run(
+    data_dir: Annotated[Path, typer.Option(exists=True)],
+    config_dir: Path = Path("config"),
+    env_file: Path | None = None,
+    projects: str = "",
+    models: str = "",
+    prompt_mode: str = "active_node",
+    repetitions: int | None = None,
+    concurrency: int | None = None,
+    all_segments: bool = False,
+    dedup: bool = False,
+    warmup: bool = True,
+    on_context_overflow: str = "skip",
+    dry_run: bool = False,
+    out: Path | None = None,
+    yes: bool = False,
+    offline_demo: bool = False,
+):
+    """Simula conversaciones completas; active_node recorre el grafo conservando historial."""
+    if env_file:
+        load_dotenv(external_path(env_file), override=False)
+    modes = csv_list(prompt_mode)
+    if not modes or set(modes) - {"active_node", "full", "subset"}:
+        raise typer.BadParameter("Modos: active_node,full,subset")
+    if on_context_overflow not in ("skip", "subset", "fail"):
+        raise typer.BadParameter("Overflow: skip,subset,fail")
+    bench = config.yaml_data(config_dir / "bench.yaml")
+    for key, value in (("repetitions", repetitions), ("concurrency", concurrency)):
+        if value is not None:
+            if value < 1:
+                raise typer.BadParameter(f"{key} debe ser positivo")
+            bench[key] = value
+    bench.update(warmup=warmup, on_context_overflow=on_context_overflow)
+    catalog = config.models(config_dir / "models.yaml")
+    requested = csv_list(models)
+    if set(requested) - set(catalog):
+        raise typer.BadParameter("Modelo desconocido")
+    selected = {k: m for k, m in catalog.items() if k in requested or (not requested and m.enabled)}
+    prices = config.yaml_data(config_dir / "pricing.yaml")["models"]
+    if offline_demo:
+        selected = {
+            "offline-fake": config.Model(
+                provider="fake", model_id="offline-fake", last_verified="synthetic"
+            )
+        }
+        prices["offline-fake"] = {"input": 0, "output": 0, "last_verified": "synthetic"}
+    pairs = inputs(data_dir, csv_list(projects), all_segments)
+    preview = plan(pairs, selected, prices, bench, modes, dedup)
+    emit(
+        {
+            "dry_run": True,
+            "network_inference_calls": 0,
+            "combinations": preview,
+            "note": "Estimaciones con trayectoria e historial desconocidos; reserva conservadora con reintentos.",
+        }
+    )
+    if dry_run:
+        return
+    if not selected:
+        raise typer.BadParameter("Ningún modelo habilitado")
+    if any(not m.enabled for m in selected.values()):
+        raise typer.BadParameter(
+            "Hay modelos deshabilitados. Revisa catálogo y condiciones antes de habilitarlos."
+        )
+    missing = [
+        m.api_key_env
+        for m in selected.values()
+        if m.provider != "fake" and not os.environ.get(m.api_key_env)
+    ]
+    if missing:
+        raise typer.BadParameter("Faltan variables: " + ", ".join(missing))
+    if any(r["budget_reserve_usd"] is None for r in preview):
+        raise typer.BadParameter(
+            "Hay precios desconocidos: completa pricing.yaml antes de inferencia"
+        )
+    reserve = sum(r["budget_reserve_usd"] for r in preview)
+    if reserve > bench["cost_guard_usd"] and not yes:
+        typer.confirm(f"Reserva estimada conservadora: USD {reserve:.2f}. ¿Ejecutar?", abort=True)
+    directory = execute(
+        pairs, selected, prices, bench, modes, out or data_dir / "results", dedup, preview
+    )
+    rows = make_report(directory)
+    emit({"run_dir": str(directory), "report_rows": len(rows), "synthetic": offline_demo})
+
+
+@app.command()
+def report(run_dir: Annotated[Path, typer.Option(exists=True)], format: str = "all"):
+    """Regenera CSV e informe Markdown privados."""
+    if format not in ("all", "table", "csv", "md"):
+        raise typer.BadParameter("Formato: all,table,csv,md")
+    rows = make_report(run_dir)
+    if format in ("all", "table"):
+        emit(rows)
+
+
+@app.command()
+def compare(run_dir: Annotated[Path, typer.Option(exists=True)], baseline: str):
+    """Deltas contra un baseline, solo para condiciones equivalentes."""
+    rows = comparisons(make_report(run_dir), baseline)
+    write_private(run_dir / "comparison.json", rows)
+    emit(rows)

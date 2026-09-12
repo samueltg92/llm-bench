@@ -1,0 +1,27 @@
+# Default deny: only reviewed source, configuration and synthetic tests belong in Git.
+/*
+!/.gitignore
+!/.env.example
+!/pyproject.toml
+!/uv.lock
+!/README.md
+!/SECURITY.md
+!/docs/
+!/src/
+!/tests/
+!/config/
+!/scripts/
+!/.githooks/
+!/.github/
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*
+!/.env.example
+**/*.pem
+**/*.key
+**/results/
+**/bundles/
+**/transcripts/
+**/private/
+**/.DS_Store

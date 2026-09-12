@@ -1,0 +1,12 @@
+repetitions: 3
+prompt_mode: active_node
+dedup: false
+concurrency: 1
+warmup: true
+max_tool_iterations: 3
+on_context_overflow: skip
+cost_guard_usd: 5.0
+context_warning_ratio: 0.85
+context_skip_ratio: 0.95
+timeouts: {connect: 10, read: 120}
+retries: {max_attempts: 3, base_delay_s: 2.0}

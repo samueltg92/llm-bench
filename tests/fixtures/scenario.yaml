@@ -1,0 +1,28 @@
+id: synthetic_flow
+project: project_1
+description: Escenario totalmente ficticio para pruebas del motor.
+turns:
+  - content: Mi documento es DEMO-001. Consulta mi estado, por favor.
+    expect_tools:
+      - tool: verificar
+        arguments: {documento: DEMO-001}
+      - tool: route_node
+        arguments: {target_node: Consulta}
+  - content: Sí, consulta mi estado.
+    expect_tools:
+      - tool: consultar
+  - content: Gracias, puedes finalizar.
+tool_mocks:
+  verificar:
+    response: {ok: true, identidad_validada: true}
+    state_updates: {identidad_validada: true}
+  consultar:
+    response: {ok: true, estado: activo}
+tool_prerequisites:
+  consultar: {identidad_validada: true}
+rules:
+  - id: no_internal_markers
+    kind: forbidden_regex
+    value: 'SYSTEM PROMPT|<think>'
+expected_path: [Inicio, Consulta, Cierre]
+nodes_subset: [Inicio, Consulta, Cierre]
