@@ -11,4 +11,10 @@ def create(model, timeouts=None):
         from .fake import FakeProvider
 
         return FakeProvider()
-    raise ValueError("Unknown provider")
+    # Extensions are installed Python packages, never code loaded from a prompt/export.
+    from importlib.metadata import entry_points
+
+    matches = list(entry_points(group="llm_bench.providers", name=model.provider))
+    if len(matches) != 1:
+        raise ValueError("Unknown or ambiguous provider adapter: " + model.provider)
+    return matches[0].load()(model, timeouts)

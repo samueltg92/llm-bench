@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOT_FILES = {".gitignore", ".env.example", "README.md", "SECURITY.md", "pyproject.toml", "uv.lock"}
+ROOT_FILES = {"LICENSE", ".gitignore", ".env.example", "README.md", "SECURITY.md", "pyproject.toml", "uv.lock"}
 DIRECTORIES = {"src", "tests", "scripts", "config", "docs", ".githooks", ".github"}
 SECRET_PATTERNS = [
     re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),

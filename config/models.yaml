@@ -1,5 +1,6 @@
 models:
   mistral-small-4:
+    display_name: Mistral Small 4
     enabled: true
     provider: openai_compat
     base_url: https://api.mistral.ai/v1
@@ -12,6 +13,7 @@ models:
     source_url: https://docs.mistral.ai/models/mistral-small-4-0-26-03
     last_verified: '2026-09-12'
   gpt-oss-120b:
+    display_name: GPT-OSS 120B
     enabled: true
     provider: openai_compat
     base_url: https://api.groq.com/openai/v1
@@ -29,6 +31,7 @@ models:
     # Cerebras: https://api.cerebras.ai/v1
     # OpenRouter: https://openrouter.ai/api/v1
   gemma-4-31b:
+    display_name: Gemma 4 31B
     enabled: false
     provider: google_genai
     model_id: gemma-4-31b-it
@@ -41,6 +44,7 @@ models:
     data_policy: free_tier_product_improvement
     notes: Hosted API supports system/tools. Disabled because the free tier uses data for product improvement; review suitability for private inputs before enabling.
   glm-5.3-flash:
+    display_name: GLM 5.3 Flash
     enabled: true
     provider: openai_compat
     base_url: https://api.z.ai/api/paas/v4

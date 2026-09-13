@@ -1,277 +1,183 @@
 # llm-bench
 
-Benchmark de conversaciones completas para comparar latencia, costo y cumplimiento de LLM.
-Los proyectos se identifican exclusivamente como **Proyecto 1**, **Proyecto 2**, etc.
-Los datos importados, escenarios reales, prompts y transcripciones viven fuera del repositorio.
+A Python toolkit for benchmarking conversational LLMs with **your own prompts, tools and conversation flows**. Compare latency, token usage, calculated costs, native function calls and explicit scenario rules. Inspect the simulated conversations in a private, offline HTML viewer.
 
-## Instalación
+The engine does not contain customer prompts or project-specific scoring rules. Projects use anonymous aliases (`project_1`, `project_2`, …); prompts, credentials, scenarios and raw results stay outside Git. MIT licensed.
 
-Python 3.11 o posterior y [uv](https://docs.astral.sh/uv/).
+## Install
+
+Python 3.11+ and [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv sync --no-editable --extra dev
+uv sync --no-editable --extra dev --extra report
 git config core.hooksPath .githooks
 uv run --no-editable vbench --help
 ```
 
-## Prueba local con datos ficticios
+## Try it without an API key or API charges
 
-Crea un directorio externo a cualquier working tree Git. El ejemplo no consume APIs:
+The included fixtures are fictional. Create a directory outside every Git working tree:
 
 ```sh
 mkdir -p ../bench-private/scenarios
-cp tests/fixtures/scenario.yaml ../bench-private/scenarios/
-uv run --no-editable vbench extract --input tests/fixtures/mini_export.json --project project_1 --out ../bench-private/bundles
-uv run --no-editable vbench run --data-dir ../bench-private --offline-demo --repetitions 1
+cp tests/fixtures/neutral_scenario.yaml ../bench-private/scenarios/
+uv run --no-editable vbench import-bundle \
+  --input tests/fixtures/neutral_graph.json --out ../bench-private/bundles
+uv run --no-editable vbench run \
+  --data-dir ../bench-private --offline-demo --repetitions 1 --no-warmup
 ```
 
-`offline-demo` comprueba la instalación, persistencia y reportes. Sus respuestas son ficticias;
-no demuestra capacidad, velocidad ni cumplimiento de un modelo real. Las pruebas automatizadas
-sí ejercitan recorridos completos, validación de herramientas y manejo de errores.
+The offline provider returns canned text. It checks installation, orchestration and artifact generation; it does **not** demonstrate real model performance and will fail the example's expected tool calls. Automated tests separately exercise successful and failed native tool flows. Private outputs include `manifest.json`, `calls.jsonl`, `runs.jsonl`, `transcripts/`, CSV summaries and Markdown conversation histories.
 
-## Datos privados y credenciales
+## Bring your own project
 
-Guarda una copia de `.env.example` en el directorio externo y complétala localmente.
-No agregues exports ni escenarios reales al repositorio, ni siquiera renombrados.
-El programa rechaza escribir bundles o resultados dentro de un working tree Git.
+Use [the neutral JSON example](tests/fixtures/neutral_graph.json) and [scenario example](tests/fixtures/neutral_scenario.yaml). There is no dependency on a particular platform's export format.
 
-```sh
-uv run --no-editable vbench extract --input /ruta/privada/export.json --project project_1 --out ../bench-private/bundles
-uv run --no-editable vbench doctor --env-file ../bench-private/.env
-uv run --no-editable vbench run --data-dir ../bench-private --dry-run
-uv run --no-editable vbench run --data-dir ../bench-private --env-file ../bench-private/.env --projects project_1 --repetitions 1
-```
+A bundle defines:
 
-Los escenarios se escriben en `../bench-private/scenarios/*.yaml`. Usa el ejemplo ficticio como
-referencia del esquema. `tool_mocks`, reglas, variables y nombres internos quedan allí, privados.
-El extractor acepta `--composition single_node` para agentes independientes por segmento.
-Cada escenario de segmento declara `segment` y solo el de referencia usa `reference: true`.
+- Original system and node prompts, the starting node and tool JSON Schemas.
+- `composition: all_nodes` for a graph, or `single_node` for independent segments.
+- `nodes[].transitions`: allowed destination alias → node ID.
+- `routing.tool_name` and `routing.argument_name`: the actual routing interface to advertise.
+- `nodes[].tool_transitions`: business tool name → node ID, followed only after a valid call and successful simulated result.
+- `allowed_languages`: two-letter language codes, such as `[en]`, `[es]` or `[en, es]`. An empty list disables language checking.
+- `orchestration_language`: `en` or `es` for added transport instructions. Original prompt text can be in any language.
+- Optional `routing.transport_note`: an explicitly declared compatibility instruction for your source platform.
 
-## Conversaciones, nodos y herramientas
+`import-bundle` validates the graph and schemas, fingerprints the original input and saves an external bundle. The older `vbench extract` command remains an adapter for the documented graph-export layout; other exports should be converted to the neutral schema. This is not an automatic parser for every platform or a tool that infers hidden business rules from prose.
 
-`active_node` **no es un benchmark de nodos aislados**. La conversación empieza en el nodo
-inicial, conserva el historial completo, valida `route_node` y carga el nuevo prompt antes
-de continuar. El modelo decide las transiciones; el evaluador nunca fuerza la ruta esperada.
+Scenarios specify simulated user turns, branch-dependent wording (`content_by_node`), variables, mock tool responses, state updates, prerequisites, expected function names/argument subsets/counts, forbidden tools, per-turn limits, terminal conditions and explicit assertions. Expected flow milestones can use node IDs or names. Intermediate steps are allowed; unreachable milestone sequences are rejected.
 
-`full` añade todos los prompts como prueba de estrés, manteniendo el estado y los permisos del
-nodo activo. `subset` limita los nodos disponibles y registra si el recorrido sale del subconjunto.
-Una conversación por segmento usa un solo nodo y no se duplica entre modos.
+**The expected path is an assertion, not an instruction to force the model through that path.** Changing a scoring rule requires changing scenario configuration. Backend handlers from exports are never executed.
 
-```sh
-uv run --no-editable vbench run --data-dir ../bench-private --prompt-mode active_node,full --dry-run
-uv run --no-editable vbench run --data-dir ../bench-private --all-segments --dry-run
-```
+## Bring your own models
 
-Las herramientas usan mocks, nunca ejecutan handlers importados. El benchmark valida nombre,
-argumentos JSON Schema, disponibilidad en el nodo, condiciones previas, expectativas por turno,
-herramientas prohibidas y rutas esperadas. Mide primera emisión de herramienta, latencia del
-mock y tiempo hasta texto después de las herramientas. Los errores simulados son configurables.
-La latencia del mock **no es** la latencia de una integración externa real.
-
-## Métricas y lectura del resultado
-
-- `ttft_ms`: primer texto o delta de herramienta; excluye eventos vacíos y razonamiento separado.
-- `first_text_ms`: primer texto del asistente en esa llamada; puede ser null si solo hay herramientas.
-- `first_tool_ms`: primera emisión de herramienta.
-- `turns[].first_text_ms`: espera desde el inicio del turno, incluyendo rondas de herramientas y reintentos.
-- Latencia total, tokens/s, consumo, caché, razonamiento y costo por conversación y mil conversaciones.
-- Herramientas inválidas/omitidas/prohibidas, reglas explícitas y señales de idioma distinto del español.
-
-El texto visible en un canal de respuesta se considera texto aunque revele razonamiento; las
-señales de idioma y reglas ayudan a detectarlo. Las reglas no implementadas no se consideran
-aprobadas. La detección de idiomas es heurística y deja casos ambiguos como desconocidos.
-
-Se guardan `manifest.json`, `calls.jsonl`, `runs.jsonl`, `transcripts/`, `summary.csv`, `REPORT.md` y `CONVERSATIONS.md`.
-Este último permite revisar preguntas, respuestas y resultados simulados en orden.
-La salida completa es **privada**. El sistema aplica permisos locales restrictivos y redacta
-valores de credenciales del entorno. No publica reportes automáticamente.
-
-```sh
-uv run --no-editable vbench report --run-dir /ruta/privada/results/experimento
-uv run --no-editable vbench compare --run-dir /ruta/privada/results/experimento --baseline gpt-4.1
-```
-
-La tabla principal excluye estrés, contexto elevado, concurrencia, protocolos de herramientas
-en texto, reintentos y datos sintéticos. No mezcles escenarios distintos al elegir un modelo.
-El hash canónico ayuda a verificar igualdad de instrucciones; el hash del request también
-incluye el historial, que puede divergir entre modelos.
-
-## Compatibilidad de contexto
-
-La auditoría local compara el tamaño estimado de los prompts con la ventana configurada por
-despliegue, reserva espacio para la salida y muestra evidencia de tamaños ya procesados:
-
-```sh
-uv run --no-editable vbench audit-context --data-dir ../bench-private --out ../bench-private/context-review --results-dir ../bench-private/results
-```
-
-No hace inferencias. Escribe `CONTEXT.md` y `context-audit.json` privados y contrasta
-`active_node` con `full`; los segmentos independientes se mantienen separados. Los modelos
-deshabilitados pueden incluirse explícitamente con `--models` para auditar sus límites sin llamarlos.
-
-El historial se comprueba otra vez antes de cada llamada, incluso después de resultados grandes
-de herramientas. No se recorta automáticamente. `skipped_context` también puede indicar que se
-agotó el margen preventivo configurado, aunque no se haya alcanzado la ventana publicada.
-
-El conteo entre modelos es aproximado. `usage` del proveedor permite documentar tamaños
-procesados; no prueba por sí solo que la ventana completa funcione ni que el proveedor no haya
-recortado internamente. La retención de información, las reglas y las tools se evalúan aparte.
-Los límites de tokens por minuto de la cuenta tampoco equivalen a la ventana del modelo.
-
-## Modelos, precios y gasto
-
-El catálogo está en `config/models.yaml`; tarifas USD por millón de tokens en `config/pricing.yaml`.
-Agregar otro despliegue compatible requiere una nueva entrada y su tarifa. Un modelo en otro
-proveedor debe tener su propia clave: la latencia y el costo pertenecen al despliegue.
-
-Antes de cualquier ejecución se imprime un preflight sin inferencia. Incluye una estimación de
-gasto y una reserva conservadora usando máximos de contexto, llamadas y reintentos. No es una
-cotización exacta: el historial, caché y ruta todavía no se conocen. Sobre USD 5 se pide confirmación
-o `--yes`. Precios desconocidos bloquean inferencia. `doctor --online` realiza pruebas breves
-pagables con un saludo ficticio; el modo predeterminado de doctor no llama APIs.
-
-Las operaciones online requieren además un `budget.json` privado, junto al `.env`
-o indicado con `--budget-file`. Ejemplo de presupuesto inicial para un piloto:
-
-```json
-{"limit_usd": 1, "max_operation_usd": 0.25, "reserved_usd": 0, "reservations": []}
-```
-
-El registro reserva una cota conservadora antes de llamar a proveedores, usando la
-ventana de contexto completa, la salida máxima, las repeticiones, los reintentos y
-el calentamiento. `--yes` no evita estos límites. Las reservas se escriben de forma
-atómica. Una ejecución terminada libera solo capacidad de llamadas que no utilizó;
-cada intento realizado, incluso fallido, conserva su cota completa sin descuento de caché.
-El contador aumenta antes de iniciar la petición. Las ejecuciones interrumpidas y
-los registros antiguos sin evidencia de finalización conservan su reserva original.
-La conciliación conserva el historial y es idempotente. Estos montos siguen siendo
-cotas prudenciales, no gasto facturado.
-Para presupuestos independientes por modelo, agrega `models` al registro privado:
-
-```json
-{
-  "limit_usd": 100,
-  "max_operation_usd": 100,
-  "reserved_usd": 0,
-  "models": {
-    "model-a": {"limit_usd": 25, "reserved_usd": 0},
-    "model-b": {"limit_usd": 25, "reserved_usd": 0},
-    "model-c": {"limit_usd": 25, "reserved_usd": 0},
-    "model-d": {"limit_usd": 25, "reserved_usd": 0}
-  },
-  "reservations": []
-}
-```
-
-Reemplaza los alias por las claves del catálogo. El preflight muestra la reserva por modelo,
-incluyendo calentamiento y reintentos. Un modelo no puede utilizar el saldo de otro;
-modelos sin presupuesto asignado se rechazan. Las reservas de varios modelos son atómicas.
-El total reservado debe coincidir con la suma de los saldos reservados por modelo.
-
-`doctor --online --out /ruta/privada/diagnostico.json` guarda el diagnóstico fuera
-de Git. Si una petición falla, muestra el estado HTTP, códigos numéricos del proveedor
-y cabeceras numéricas de límites disponibles, sin copiar el cuerpo del error ni credenciales.
-El saldo disponible y los límites de solicitudes o tokens son controles distintos.
-
-Para respetar cuotas de una cuenta, `bench.yaml` admite límites por modelo:
+Add any deployment supported by an adapter to your **external** `models.yaml`; model IDs are not allowlisted. Use a separate key for each deployment/reasoning profile you want to compare:
 
 ```yaml
-rate_limits_by_model:
-  model-a:
-    tokens_per_minute: 100000
-    requests_per_second: 1.67
-    input_margin: 1.2
+models:
+  my-deployment-low:
+    display_name: My deployment · low
+    enabled: true
+    provider: openai_compat
+    base_url: https://YOUR_ENDPOINT/v1
+    model_id: YOUR_MODEL_ID
+    api_key_env: MY_LLM_API_KEY
+    context_window: 32000  # Replace with your deployment's verified limit.
+    supports_tools: true
+    supports_system: true
+    extra: {reasoning_effort: low}  # Only if this endpoint supports it.
+    last_verified: PENDING
 ```
 
-El ejecutor espacia solicitudes y reserva tokens estimados de entrada con margen,
-más toda la salida permitida, durante una ventana móvil de 61 segundos. El contador
-se comparte entre los casos de ese modelo dentro de la ejecución. Las pausas se
-registran aparte y se excluyen de TTFT y latencia del modelo. Una petición que exceda
-la cuota se detiene sin recortar el prompt. Las estimaciones entre tokenizadores y
-el tráfico de otros procesos pueden provocar límites adicionales del proveedor.
+`openai_compat` supports the Chat Completions streaming protocol. `google_genai` supports the Google Gen AI adapter. A local model server can use either compatible protocol. Other protocols require an adapter implementing [LLMProvider](src/llm_bench/providers/base.py), installed through the `llm_bench.providers` Python entry-point group. The factory receives `(model, timeouts)`; SDK/network work must be deferred to `stream_chat`. Adapters must report streaming events and normalize usage correctly. See [extension guidance](docs/extending.md).
 
-Para consolidar tandas guardadas en subdirectorios, usa `vbench report --run-dir
-/ruta/privada/results --recursive`. El informe agrupa cada caso y modelo y conserva
-las conversaciones completas en un documento privado. `vbench compare --run-dir
-/ruta/privada/results --recursive --baseline model-a` calcula deltas solo cuando
-coinciden las huellas del escenario y del origen, además de las condiciones de ejecución.
+Compatibility depends on the deployment: tool support, system messages, usage fields, output limits and reasoning parameters must be verified. The bundled model catalog is a set of examples, not the supported-model boundary. `low` is not a universal “thinking off” setting.
 
-Si el prompt exige una herramienta de plataforma que no aparece en el export, el
-escenario puede declarar `platform_tools` con `name`, `description`, `nodes` y
-`parameters_schema`. Cada declaración requiere una respuesta en `tool_mocks` y no
-puede reemplazar herramientas existentes. El contrato supuesto queda en el manifiesto
-y sus llamadas se identifican como schema no verificado contra producción.
-
-Se evalúa el intento de function call emitido por el modelo; no se contactan servicios
-reales. La disponibilidad o falla del backend simulado se registra aparte. Una tool
-incluida en `terminal_tools` termina la simulación inmediatamente tras una llamada
-válida con mock exitoso, conservando el intento y evitando peticiones posteriores al LLM.
-Al migrar un registro con consumo previo, conserva su historial y asigna también ese consumo.
-No reinicies el registro entre ejecuciones y usa el mismo archivo para todos los
-proveedores. Si ya hubo consumo, inclúyelo conservadoramente en `reserved_usd`.
-La cota depende de precios y ventanas de contexto correctos; no controla consumos
-externos a esta CLI, impuestos ni cambios de tarifas del proveedor.
-`doctor --online --max-output-tokens 512` permite margen para modelos que razonan;
-una respuesta truncada se informa como `output_limit`.
-
-Para pilotos, `bench.yaml` permite `max_calls_per_conversation` como tope global
-de llamadas por conversación, manteniendo las transiciones y el historial. El
-plan de presupuesto usa ese mismo tope y la ejecución devuelve `call_limit` si
-se agota. `min_request_interval_s` espacia solicitudes de cada modelo; esas
-esperas se registran aparte como `rate_limit_wait_ms` y se excluyen de las
-latencias de inferencia y de turno. Con cuota compartida entre modelos, usa
-concurrencia 1 y evita otras ejecuciones simultáneas de la misma cuenta.
-
-Gemma está deshabilitado inicialmente porque la oferta gratuita declara uso de datos para
-mejorar productos. Revisa las condiciones del servicio antes de habilitarlo con datos privados.
-Las verificaciones documentales y las pruebas de conectividad son distintas; estas últimas
-requieren tus credenciales. Consulta [el catálogo verificado](docs/providers.md).
-
-## Validación y límites
+Copy `.env.example` outside Git and add your environment-variable names there. Use rates covering the applicable context/usage tier; a static price table does not automatically discover pricing tiers. Add verified input/output/cache prices under the same model keys in `pricing.yaml`; rates are USD per million tokens. Copy `config/bench.yaml` to the external configuration directory and adjust limits, repetitions, retries and concurrency.
 
 ```sh
-uv run --no-editable pytest -q
-uv run --no-editable ruff check .
-python3 scripts/check_public.py --staged
+uv run --no-editable vbench doctor --config-dir ../bench-private/config --env-file ../bench-private/.env
+uv run --no-editable vbench run --data-dir ../bench-private \
+  --config-dir ../bench-private/config --models my-deployment-low --dry-run
 ```
 
-La v1 solo mide LLM. No incluye STT/TTS, handlers reales, bases de conocimiento, simulador de usuario
-con LLM ni un juez semántico automático. Los guiones son deterministas; pueden declarar variantes
-`content_by_node` para responder según el nodo alcanzado. Un camino fallido queda registrado.
+`doctor` is local unless `--online` is supplied. `--dry-run` plans requests and budget reservations without inference. Create the ledger with `budget-init` below before starting an online run. Real runs use a persistent external budget ledger with global and per-model pools. Configure your own limits; never reset a ledger to bypass already reserved spending. These are local application controls, not account-wide provider billing caps. Unknown pricing blocks inference. Retried or interrupted calls may retain conservative reservations until supported by usage evidence.
 
-Deduplicación desactivada por defecto: `--dedup` solo mueve párrafos exactos presentes una vez
-en todos los nodos seleccionados, registra el experimento por separado y no promete equivalencia
-semántica. Los conteos `o200k_base` son estimaciones entre modelos. Los cargos usan `usage` cuando
-está disponible; no se inventan costos ni métricas para errores o saltos. Con pocas repeticiones,
-p95 es exploratorio. El umbral de contexto del 85% es preventivo, no una degradación demostrada.
+## Set total and per-model budgets before online tests
 
-Consulta [seguridad](SECURITY.md) y [decisiones de diseño](docs/design.md).
+Initialize a **new** external ledger once. Budget keys must exactly match your model catalog keys:
 
-## Informe ejecutivo y revisión privada
+```sh
+uv run --no-editable vbench budget-init \
+  --budget-file ../bench-private/budget.json \
+  --total 30 \
+  --model-limit my-deployment-low=20 \
+  --model-limit my-other-model=15 \
+  --per-operation 10
+uv run --no-editable vbench budget-status --budget-file ../bench-private/budget.json
+```
 
-Instala el extra `report` para generar el PDF con `scripts/create_onepager.py`.
-El comando recibe directorios externos de escenarios, resultados, configuración y
-presupuesto; `--help` muestra los argumentos. También admite un archivo privado
-de argumentos, uno por línea, con `@/ruta/privada/report-args.txt`.
+This permits at most USD 30 across the application, at most USD 20 for the first model and USD 15 for the second, with at most USD 10 reserved by one operation. The shared ceiling still applies: both models cannot spend their individual maximums if that would exceed USD 30. A model cannot borrow another model's unused allowance. An unlisted model has no budget authorization. `--per-operation` is optional and defaults to the total ceiling.
 
-El PDF resume cobertura, rutas, function calls esperados, reglas explícitas,
-medianas de latencia y costos conocidos. Las conversaciones rechazadas por cuota
-o contexto no se incluyen en porcentajes de calidad. Los CSV detallan resultados
-y disposición de cada caso. La cobertura de nodos cuenta prompts con respuesta
-aceptada por la API, sin inferir que todos los nodos del origen fueron evaluados.
+Use the same ledger for every related benchmark, online diagnostic and worker:
 
-`Conversaciones.html`, en el directorio privado de revisión, compara todos los
-modelos simultáneamente, con métricas por proyecto y escenario y filtro por turno.
-La opción «Same cases across all 4» intersecta casos evaluables, conservando los fallos
-de calidad. En un escenario se muestran también latencias de llamadas aceptadas
-si la conversación quedó incompleta; el agregado del proyecto usa conversaciones completas.
-`--private-project-labels` acepta nombres privados por alias, usados exclusivamente
-en ese visor. Incluye los historiales originales y los
-resultados simulados de tools; nunca debe publicarse. Los cierres silenciosos y las
-señales de idioma revisadas se documentan por separado, sin editar los registros.
+```sh
+uv run --no-editable vbench run --data-dir ../bench-private \
+  --config-dir ../bench-private/config --env-file ../bench-private/.env \
+  --budget-file ../bench-private/budget.json \
+  --models my-deployment-low,my-other-model --repetitions 1 --no-warmup
+```
 
-El PDF y la interfaz de revisión se generan en inglés; las conversaciones conservan
-su idioma original. `--private-scenario-labels` admite títulos y descripciones en inglés
-en un JSON externo, indexados por hash de escenario, sin modificar los casos de prueba.
-Los CSV se llaman `Detailed-results.csv` y `Case-coverage.csv`;
-`Node-coverage.json` contiene la cobertura por nodo.
+Before transport, the application atomically reserves a conservative amount against **all three** limits: total, per-model and per-operation. Each request/retry is also checked against its operation reservation. Concurrent workers using the same ledger cannot independently reuse the same balance. Built-in adapters reject advanced parameters that override reserved output limits, select another model, request multiple candidates or enable hidden automatic tool rounds. A request that would exceed the authorized reserve is rejected before transport; `--yes` does not bypass this check.
+
+`budget-status` shows limits, reserved amounts and remaining application capacity. Reservations can exceed calculated consumption because they retain room for full context/output, failures and unknown usage. Completed executions may release unused capacity only with supporting records; interrupted or unverified attempts retain their bounds. Initialization refuses to overwrite an existing ledger, including one with prior spending. Never delete/reset the file or create a second ledger to continue the same budget.
+
+These controls rely on correct deployment limits, prices, token accounting and compliant adapters. They do not cap other applications, console activity, taxes or unmodeled provider fees. Use provider-side billing limits as an additional control where available. Zero-cost offline tests make no provider calls and do not consume the ledger. For a complete walkthrough of prompts, credentials, pricing and limits, see [Configuration from scratch](docs/configuration.md).
+
+## Conversation modes and context
+
+- `active_node`: start at the actual starting node, preserve history, apply only allowed transitions and load each new node prompt before continuing.
+- `full`: include all node prompts while retaining the active node's permissions; a declared stress-test condition.
+- `subset`: restrict available node prompts to an explicit selection; record out-of-subset transitions.
+- Independent segments: select `segment` in each scenario; add `--all-segments` to include non-reference segments.
+
+Full prompts are not silently shortened. Context checks include prompts, history, tool schemas and output allowance. Token estimation is approximate across tokenizers; provider-reported acceptance is separate evidence. Use `vbench audit-context` to compare configured limits, request estimates and recorded accepted inputs. Context capacity, rate limits and rule-following quality are different measurements.
+
+## What the metrics mean
+
+| Metric | Measurement and interpretation |
+| --- | --- |
+| TTFT | API request start to the first nonempty text or tool delta. Separate reasoning events do not start this clock's endpoint. |
+| First user-facing text | Simulated user-turn start to the first assistant text, including preceding LLM/tool rounds. It is not the same as TTFT. |
+| Full latency | API request start to the end of the response stream. |
+| Flow latency | Duration of a simulated user turn across its LLM calls, orchestration and mock results; not the duration of the entire conversation. |
+| First native tool delta | Request start to the first native function-call name or argument delta. |
+| Expected tools | Passed positive expectations / applicable positive expectations. Requires a native call, correct name, schema-valid arguments matching the expected subset, and specified count in the specified turn. Unreached positive expectations fail. |
+| Explicit case rules | Passed programmed assertions / applicable assertions: required or prohibited patterns, length, expected active node, forbidden calls, tool limits and tool-before-text ordering. Does not grade every instruction semantically. |
+| Ordered flow milestones | Share of applicable conversations whose actual path contains the expected nodes in order. Extra steps are allowed; repeated milestones matter. |
+| Complete conversations | Completed / evaluable conversations. Completion does not imply all quality checks passed. |
+| Evaluable coverage | Evaluable / planned observations. Quota, provider and context blocks are shown separately from quality failures. |
+| Native / invalid calls | Counts of native function attempts and calls rejected by schema, availability, routing or prerequisites. Text-protocol emulation is separately recorded and cannot satisfy a native-call expectation. |
+| Language flags | Heuristic language spans outside the allowed language set, with confirmed/pending human-review decisions. A missing flag is not proof of language correctness. |
+| Tokens and throughput | Provider-reported input, output, cached and reasoning tokens when available; otherwise estimates are labeled. Token generation speed and timing populations are recorded separately. |
+| Calculated cost | Usage × configured input/output/cache rates. Reports distinguish total known cost, cost per API call and cost per conversation. Missing costs are not zero and calculations are not invoices. |
+| Quota wait | Local pacing delay, excluded from reported call/turn latencies and shown separately. |
+| Accepted input size | Largest or distributed provider-measured accepted input. Does not prove quality at the full advertised context window. |
+
+Consolidated reports show **mean, minimum, maximum and sample count N**, calculated from individual samples rather than averages of project medians. Timing uses complete conversations; quality includes evaluable failures; known costs also include recorded portions of incomplete conversations. Project/scenario tables identify when they use medians. Common-case comparisons intersect evaluable observations across the selected models, retaining quality failures. For detailed samples and limitations, consult the generated report.
+
+## Compare projects and inspect conversations
+
+Install the `report` extra and run from the repository checkout:
+
+```sh
+uv run --no-editable python scripts/create_onepager.py \
+  --data-dir ../bench-private --config-dir ../bench-private/config \
+  --run-root ../bench-private/results --out ../bench-private/deliverables
+```
+
+Use `--models key-a,key-b` to select any number of catalog entries. Multiple `--run-root` options are supported. The report rejects duplicate observations or mixed recorded model profiles: select explicit exclusions/replacements or configure distinct model keys. Add `--include-synthetic` only for fixture runs; their reports are visibly labeled.
+
+Outputs: a compact PDF (paginated for larger matrices), a consolidated PDF per model, CSV metrics and an offline `conversation-review/Conversaciones.html` viewer. Select **All projects** for global statistics or **All simulated scenarios** for the selected project. A specific scenario displays every selected model's recorded conversation side by side. `--baseline-summary` adds a separate initial/current statistics comparison; it does not merge historical profiles into current scores. `--profile-notes-file` adds audited context.
+
+Optional `--cost-root`, `--budget-file`, `--guard`, `--env-file`, `--private-project-labels` and `--private-scenario-labels` support private workflows. Labels and transcripts stay in the private viewer. Review any result before sharing it; anonymous aliases alone do not remove sensitive content.
+
+## Privacy, reproducibility and limits
+
+- Real input and output paths must be outside **every** Git working tree. Files use restrictive local permissions; environment credential values are redacted.
+- Commit/push hooks scan for credentials and optionally private names and source fragments through an external guard. GitHub CI runs the generic scanner; your private corpus is never uploaded for CI.
+- Request/source/scenario fingerprints and experiment manifests preserve provenance. Prompt transformations, reasoning changes, cache state, retry policy and concurrency can change results.
+- Tools use deterministic mocks; live backend latency, ASR, TTS and real telephony are outside scope. User turns are scripted, with configurable branch wording; there is no universal autonomous user simulator.
+- No automatic semantic judge, production-performance guarantee, universal export importer or automatic compliance certification is claimed. Provider privacy and retention settings must be checked for the deployment you choose.
+- The public repository contains only code, documentation and fictional fixtures. See [SECURITY.md](SECURITY.md).
+
+## Development
+
+```sh
+uv run --no-editable ruff check .
+uv run --no-editable pytest -q
+python3 scripts/check_public.py --history
+```
+
+The tests cover generic routing and tool schemas, shared scenario IDs across projects, multiple languages, independent segments, adapter extensions, one/five-model reports, budget controls, privacy guards and error handling. All tests run offline.

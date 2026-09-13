@@ -46,7 +46,7 @@ def jobs_for(pairs, modes):
     for bundle, scenario in pairs:
         for mode in modes:
             effective = "single_node" if bundle.composition == "single_node" else mode
-            key = (scenario.id, effective)
+            key = (bundle.project, scenario.id, effective)
             if key not in seen:
                 seen.add(key)
                 yield bundle, scenario, mode

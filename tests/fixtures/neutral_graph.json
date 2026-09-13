@@ -1,0 +1,22 @@
+{
+  "project": "project_11",
+  "display_name": "Project 11",
+  "composition": "all_nodes",
+  "global_system": "This is a fictional library simulation. Respond in English.",
+  "start_node": "entry",
+  "orchestration_language": "en",
+  "allowed_languages": ["en"],
+  "routing": {"tool_name": "handoff_stage", "argument_name": "destination"},
+  "nodes": [
+    {"id": "entry", "name": "Entry", "prompt": "Look up the requested book with search_catalog.",
+     "tool_names": ["search_catalog"], "tool_transitions": {"search_catalog": "review"}},
+    {"id": "review", "name": "Review", "prompt": "When the lookup is complete, hand off to Done.",
+     "transitions": {"Done": "done"}},
+    {"id": "done", "name": "Done", "prompt": "Explain the simulated availability and finish."}
+  ],
+  "tools": [
+    {"name": "search_catalog", "original_name": "search_catalog", "description": "Look up a fictional book.",
+     "parameters_schema": {"type": "object", "properties": {"title": {"type": "string"}},
+       "required": ["title"], "additionalProperties": false}}
+  ]
+}

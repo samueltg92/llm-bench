@@ -7,7 +7,7 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
-from .bundle import Bundle, Node, Tool
+from .bundle import Bundle, Node, Routing, Tool
 from .privacy import write_private
 from .tokens import count
 
@@ -130,17 +130,20 @@ def extract(source: Path, project: str, composition: str | None = None) -> Bundl
     return bundle
 
 
-def route_tool(targets: list[str]) -> Tool:
+def route_tool(targets: list[str], routing: Routing | None = None, language="es") -> Tool:
+    routing = routing or Routing()
     return Tool(
-        name="route_node",
-        original_name="route_node",
+        name=routing.tool_name,
+        original_name=routing.tool_name,
         synthetic=True,
-        description="Cambia al nodo destino cuando las reglas del nodo activo lo indiquen.",
+        description=("Switch to the destination node when the active node's rules require it."
+                     if language == "en" else
+                     "Cambia al nodo destino cuando las reglas del nodo activo lo indiquen."),
         parameters_schema={
             "type": "object",
-            "required": ["target_node"],
+            "required": [routing.argument_name],
             "additionalProperties": False,
-            "properties": {"target_node": {"type": "string", "enum": targets}},
+            "properties": {routing.argument_name: {"type": "string", "enum": targets}},
         },
     )
 

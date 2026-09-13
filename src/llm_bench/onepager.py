@@ -73,7 +73,7 @@ def summarize(runs, calls, planned, model_names, *, known_costs, reserved, notes
                 "rules_passed": sum(a["pass"] for a in rules), "rules_total": len(rules),
                 "paths_passed": sum(r["expected_path_match"] for r in route_runs),
                 "paths_total": len(route_runs),
-                "native_calls": sum(r.get("tool_calls_total", 0) for r in selected),
+                "native_calls": sum(r.get("native_tool_calls", r.get("tool_calls_total", 0)) for r in selected),
                 "invalid_calls": sum(r.get("invalid_tool_calls", 0) for r in selected),
                 "language_flags": sum(r.get("language_violations", 0) for r in selected),
                 "cost_usd": sum(c.get("cost_usd") or 0 for c in calls
@@ -99,111 +99,88 @@ def summarize(runs, calls, planned, model_names, *, known_costs, reserved, notes
 
 
 def render(data, out: Path):
+    """Compact project comparison, paginated when the selected matrix grows."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.pdfgen import canvas
-    from reportlab.platypus import Paragraph, Table, TableStyle
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     out = external_path(out)
     write_private(out / "summary.json", data)
     pdf = out / "Benchmark-LLM.pdf"
-    width, height = A4
-    c = canvas.Canvas(str(pdf), pagesize=A4, pageCompression=1)
-    c.setTitle("LLM benchmark — results and methodology")
-    c.setAuthor("LLM Benchmark")
-    c.setSubject("Anonymized model comparison using Spanish conversations")
-    navy, teal, gray = colors.HexColor("#142B42"), colors.HexColor("#087F8C"), colors.HexColor("#536575")
-    margin, usable = 34, width - 68
+    width, _ = A4
+    usable = width - 68
+    navy = colors.HexColor("#142B42")
+    body = ParagraphStyle("body", fontName="Helvetica", fontSize=8, leading=10.5,
+                          textColor=navy, spaceAfter=6)
+    heading = ParagraphStyle("heading", parent=body, fontName="Helvetica-Bold", fontSize=11,
+                             leading=14, spaceBefore=9, spaceAfter=7)
+    cell_style = ParagraphStyle("cell", parent=body, fontSize=7, leading=9, spaceAfter=0)
+    story = []
 
-    def paragraph(text, x, top, w, size=9, color=navy, bold=False):
-        style = ParagraphStyle("body", fontName="Helvetica-Bold" if bold else "Helvetica",
-                               fontSize=size, leading=size * 1.35, textColor=color)
-        p = Paragraph(text, style)
-        _, h = p.wrap(w, height)
-        p.drawOn(c, x, top - h)
-        return top - h
+    def paragraph(text, style=body):
+        story.append(Paragraph(text, style))
 
     def pct(a, b):
         return f"{100 * a / b:.0f}%" if b else "—"
 
-    c.setFillColor(navy)
-    c.rect(0, height - 104, width, 104, fill=1, stroke=0)
-    paragraph("CONVERSATIONAL EVALUATION · SPANISH", margin, height - 22, usable,
-              size=8, color=colors.HexColor("#9ADDE0"), bold=True)
-    paragraph("LLM Benchmark", margin, height - 41, usable, size=25,
-              color=colors.white, bold=True)
-    paragraph("Observed results and test methodology", margin, height - 77, usable,
-              size=10, color=colors.HexColor("#D9E4EC"))
-    y = height - 122
-    cards = [(str(data["models"]), "models"), (str(data["planned_cases"]), "cases per model"),
-             (f'{data["evaluable"]}/{data["planned_combinations"]}', "evaluable cases"),
-             (f'USD {sum(data["known_costs"].values()):.2f}', "cumulative calculated cost")]
-    cw = usable / 4
-    for i, (value, label) in enumerate(cards):
-        paragraph(value, margin + i * cw, y, cw - 8, size=18, color=teal, bold=True)
-        paragraph(label, margin + i * cw, y - 25, cw - 8, size=7.5, color=gray)
-    y -= 61
-    y = paragraph("RESULTS BY PROJECT", margin, y, usable, size=10, bold=True) - 8
-    headings = ["Project / model", "Cases", "Done", "Flow", "Tools (1)", "Rules (2)", "TTFT (3)", "Latency", "USD (4)"]
-    cells = [headings]
+    paragraph("LLM Benchmark — results and methodology", heading)
+    if data.get("synthetic"):
+        paragraph("<b>SYNTHETIC OFFLINE RESULTS — not measured model performance.</b>")
+    paragraph(f"<b>{data['models']} models · {data['planned_cases']} planned scenarios per model · "
+              f"{data['evaluable']}/{data['planned_combinations']} evaluable observations</b><br/>"
+              f"Cumulative known calculated cost: USD {sum(data['known_costs'].values()):.5f}")
+    paragraph("RESULTS BY PROJECT", heading)
+    cells = [["Project / model", "Cases", "Done", "Flow", "Tools", "Rules", "TTFT", "Latency", "USD"]]
     for r in data["rows"]:
-        cells.append([r["project"].replace("Project ", "P") + " · " + r["model"],
-                      f'{r["evaluable"]}/{r["planned"]}' + ("*" if r["infrastructure_errors"] else ""),
-                      pct(r["complete"], r["evaluable"]),
-                      pct(r["paths_passed"], r["paths_total"]),
-                      pct(r["tool_checks_passed"], r["tool_checks_total"]),
-                      pct(r["rules_passed"], r["rules_total"]),
-                      f'{r["ttft_s"]:.2f} s' if r["ttft_s"] is not None else "—",
-                      f'{r["latency_s"]:.2f} s' if r["latency_s"] is not None else "—",
-                      f'{r["cost_usd"]:.3f}' if r["tested"] else "—"])
-    table = Table(cells, colWidths=[141, 45, 45, 40, 45, 47, 48, 55, usable - 466], rowHeights=19)
+        label = html.escape(r["project"] + " · " + r["model"])
+        cells.append([Paragraph(label, cell_style),
+                      f"{r['evaluable']}/{r['planned']}" + ("*" if r['infrastructure_errors'] else ""),
+                      pct(r['complete'], r['evaluable']), pct(r['paths_passed'], r['paths_total']),
+                      pct(r['tool_checks_passed'], r['tool_checks_total']),
+                      pct(r['rules_passed'], r['rules_total']),
+                      f"{r['ttft_s']:.2f} s" if r['ttft_s'] is not None else "—",
+                      f"{r['latency_s']:.2f} s" if r['latency_s'] is not None else "—",
+                      f"{r['cost_usd']:.3f}" if r['tested'] else "—"])
+    table = Table(cells, colWidths=[141, 45, 45, 40, 45, 47, 48, 55, usable - 466],
+                  repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), navy), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.5), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F0F5F8"), colors.white]),
-        ("TEXTCOLOR", (0, 1), (-1, -1), navy),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    tw, th = table.wrap(usable, height)
-    table.drawOn(c, margin, y - th)
-    y -= th + 8
-    y = paragraph(
-        "Done = complete conversation; Flow = expected milestones in order, allowing extra steps. "
-        "* Provider/context rejections are excluded from quality percentages. "
-        "(1) Expected function calls: name, arguments and turn; announcing a call is insufficient. "
-        "(2) Explicit case checks; these do not cover every prompt rule. "
-        "(3) TTFT: first text or tool delta; latency: full response. Per-call medians "
-        "from complete conversations, excluding quota waits. (4) Known cost of the cases in this table.",
-        margin, y, usable, size=7, color=gray) - 12
-    y = paragraph("METHODOLOGY", margin, y, usable, size=10, bold=True) - 6
-    y = paragraph(
-        "<b>Inputs.</b> Full original prompts, without truncation; identical cases and test data "
-        "across models. Simulated users follow deterministic scripts with branch-specific responses. "
-        "<b>Flow.</b> History is retained and node transitions are followed; "
-        "segment-based projects are evaluated separately. <b>Tools.</b> Native function calls "
-        "use mock responses; backend execution is not measured. Assumed platform interfaces "
-        "are marked unverified. <b>Measurement.</b> One run per case, without automatic "
-        "retries; calls are serial within each provider, with batches overlapping across providers. "
-        "API-reported usage, documented rates and a USD25 cap per model. "
-        "Quota rejections are distinguished from LLM failures.",
-        margin, y, usable, size=8) - 10
-    y = paragraph("INTERPRETATION AND LIMITATIONS", margin, y, usable, size=10, bold=True) - 5
-    for note in data["notes"][:3]:
-        y = paragraph("• " + html.escape(note), margin, y, usable, size=7.8) - 3
-    observed = " · ".join(f"{name}: {value:,}" for name, value in data["context_observed"].items())
-    y = paragraph("<b>Largest accepted input (tokens):</b> " + html.escape(observed)
-                  + ". Observed acceptance does not establish quality across the full advertised context window.",
-                  margin, y - 4, usable, size=7.3, color=gray)
-    if y < 36:
-        raise ValueError("One-pager overflow; shorten notes before exporting")
-    c.setStrokeColor(colors.HexColor("#D8E2E9"))
-    c.line(margin, 29, width - margin, 29)
-    paragraph("As of: " + html.escape(data.get("generated_at_utc", ""))
-              + " · Anonymized results · Private conversations · 1 / 1",
-              margin, 22, usable, size=7, color=gray)
-    c.save()
+    story.extend([table, Spacer(1, 8)])
+    paragraph("Done = completed conversation; Flow = ordered expected milestones, allowing extra steps. "
+              "Tools = passed positive function-call expectations (name, schema-valid arguments and turn). "
+              "Rules = passed explicit assertions. TTFT = first text or tool delta; Latency = full API response. "
+              "Timing columns are per-call medians from complete conversations, excluding quota waits. "
+              "USD = sum of known call costs in this selection, not a per-call price. "
+              "* Provider/context rejections are excluded from quality percentages.")
+    paragraph("METHODOLOGY AND LIMITATIONS", heading)
+    paragraph("Users supply their prompts, node graph, tool contracts, simulated user turns and expected outcomes. "
+              "Conversation history is retained; valid model-requested transitions change the active prompt. "
+              "Independent segments are evaluated separately. Tool responses are mocked: backend performance "
+              "is not measured. Native function calls and text-protocol emulation are recorded separately; "
+              "announcing a call is insufficient. Rules are programmed assertions, not exhaustive semantic grading. "
+              "Language signals use the configured allowed languages and require review. Prompt modes, "
+              "reasoning settings, repetitions and retry policies are recorded in the experiment; compare matching conditions. "
+              "Calculated costs use configured rates and available usage; unknown costs are not assumed free.")
+    for note in data.get("notes", []):
+        paragraph(html.escape(note))
+    observed = " · ".join(f"{name}: {value:,}" for name, value in data['context_observed'].items())
+    paragraph("<b>Largest accepted input (tokens):</b> " + html.escape(observed)
+              + ". Acceptance does not establish quality throughout the advertised context window.")
+
+    def footer(canvas, doc):
+        canvas.setFont("Helvetica", 7)
+        canvas.drawString(34, 22, "As of: " + data.get("generated_at_utc", "")
+                          + f" · Anonymized results · Page {doc.page}")
+
+    doc = SimpleDocTemplate(str(pdf), pagesize=A4, leftMargin=34, rightMargin=34,
+                            topMargin=26, bottomMargin=38, title="LLM benchmark — results and methodology",
+                            author="LLM Benchmark")
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
     pdf.chmod(0o600)
     return pdf

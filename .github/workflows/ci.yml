@@ -10,7 +10,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --no-editable --extra dev --locked
+      - run: uv sync --no-editable --extra dev --extra report --locked
       - run: uv run --no-editable ruff check .
       - run: uv run --no-editable pytest -q
       - run: python3 scripts/check_public.py --history

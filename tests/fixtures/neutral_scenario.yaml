@@ -1,0 +1,23 @@
+id: book_lookup
+project: project_11
+description: Fictional library lookup followed by a configurable handoff.
+turns:
+  - content: Is the fictional book Moon Atlas available?
+    expect_tools:
+      - tool: search_catalog
+        arguments: {title: Moon Atlas}
+        max_calls: 1
+      - tool: handoff_stage
+        arguments: {destination: Done}
+        max_calls: 1
+    expected_node: done
+tool_mocks:
+  search_catalog:
+    response: {available: true}
+    state_updates: {lookup_complete: true}
+tool_prerequisites:
+  handoff_stage: {lookup_complete: true}
+expected_path: [entry, done]
+rules:
+  - {id: mention_availability, kind: required_regex, value: available}
+  - {id: concise_answer, kind: max_words, value: 60}

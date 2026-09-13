@@ -18,7 +18,7 @@ def policy_and_inputs():
     policy = {"id": "review-v1", "source_sha256": "source",
               "terminal_node_ids": ["leaf"], "farewell_patterns": ["hasta luego"]}
     scenario = SimpleNamespace(turns=[1], max_turns=1)
-    bundle = SimpleNamespace(source_sha256="source", node=lambda _: SimpleNamespace(
+    bundle = SimpleNamespace(source_sha256="source", routing=SimpleNamespace(tool_name="route_node"), node=lambda _: SimpleNamespace(
         id="leaf", transitions={}))
     return policy, scenario, bundle
 

@@ -8,6 +8,102 @@ from llm_bench.budget import call_bound, reserve
 from llm_bench.config import Model
 
 
+def test_budget_cli_creates_model_pools_and_reports_remaining_capacity(tmp_path):
+    from typer.testing import CliRunner
+
+    from llm_bench.cli import app
+
+    path = tmp_path / "new" / "budget.json"
+    cli = CliRunner()
+    args = ["budget-init", "--budget-file", str(path), "--total", "12",
+            "--model-limit", "model-a=10", "--model-limit", "model-b=8", "--per-operation", "4"]
+    result = cli.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    reserve(path, 3, "test", allocations={"model-a": 3})
+    result = cli.invoke(app, ["budget-status", "--budget-file", str(path)])
+    state = json.loads(result.output)
+    assert state["remaining_usd"] == "9.000000"
+    assert state["models"]["model-a"]["remaining_usd"] == "7.000000"
+    assert state["models"]["model-b"]["remaining_usd"] == "8.000000"
+    assert path.stat().st_mode & 0o777 == 0o600
+    before = path.read_bytes()
+    assert cli.invoke(app, args).exit_code != 0
+    assert path.read_bytes() == before
+
+
+def test_custom_total_can_be_lower_than_sum_of_model_limits(tmp_path):
+    from llm_bench.budget import initialize
+
+    path = tmp_path / "budget.json"
+    initialize(path, 3, {"model-a": 2, "model-b": 2})
+    reserve(path, 2, "test", allocations={"model-a": 2})
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="cumulative"):
+        reserve(path, 2, "test", allocations={"model-b": 2})
+    assert path.read_bytes() == before
+
+
+def test_initialization_is_atomic_across_concurrent_creators(tmp_path):
+    from llm_bench.budget import initialize
+
+    path = tmp_path / "budget.json"
+
+    def attempt(_):
+        try:
+            initialize(path, 3, {"model-a": 3})
+            return True
+        except ValueError:
+            return False
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        assert sum(pool.map(attempt, range(4))) == 1
+    assert json.loads(path.read_text())["reserved_usd"] == "0.000000"
+
+
+@pytest.mark.parametrize("total", ["NaN", "-1", "not-a-number", "1.0000001"])
+def test_invalid_initial_limit_never_creates_a_ledger(tmp_path, total):
+    from llm_bench.budget import initialize
+
+    path = tmp_path / "budget.json"
+    with pytest.raises(ValueError):
+        initialize(path, total, {"model-a": 1})
+    assert not path.exists()
+
+
+def test_duplicate_model_limits_are_not_silently_overwritten(tmp_path):
+    from typer.testing import CliRunner
+
+    from llm_bench.cli import app
+
+    path = tmp_path / "budget.json"
+    result = CliRunner().invoke(app, ["budget-init", "--budget-file", str(path), "--total", "10",
+                                     "--model-limit", "a=1", "--model-limit", "a=10"])
+    assert result.exit_code != 0
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("extra", [
+    {"max_tokens": 100000}, {"extra_body": {"max_completion_tokens": 100000}},
+    {"n": 20}, {"extra_body": {"n": 20}}, {"model": "different-deployment"},
+    {"stream": False},
+])
+def test_openai_extras_cannot_invalidate_the_budget_reservation(extra):
+    with pytest.raises(ValueError, match="cannot override"):
+        Model(provider="openai_compat", model_id="example", extra=extra)
+
+
+@pytest.mark.parametrize("extra", [{"max_output_tokens": 100000}, {"candidate_count": 10},
+                                   {"automatic_function_calling": {"disable": False}}])
+def test_google_extras_cannot_expand_output_or_enable_hidden_tool_rounds(extra):
+    with pytest.raises(ValueError, match="cannot override"):
+        Model(provider="google_genai", model_id="example", extra=extra)
+
+
+def test_output_limit_parameter_cannot_be_repurposed():
+    with pytest.raises(ValueError, match="output limit"):
+        Model(provider="openai_compat", model_id="example", output_parameter="temperature")
+
+
 def ledger(tmp_path, limit=1, per_operation=1):
     path = tmp_path / "budget.json"
     path.write_text(

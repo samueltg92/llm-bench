@@ -19,7 +19,7 @@ PYTHONPATH=src python scripts/run_suite.py \
 ```
 
 Use `--resume-from` for earlier result roots. Resume matches the full scenario hash, source hash,
-model key and repetition. A failed model response remains an observation; resuming does not retry
+model key, deployment/profile settings and repetition. A failed model response remains an observation; resuming does not retry
 it to obtain a better result. Changed case definitions form a different cohort. Three consecutive
 provider failures stop that worker; resolve the account/configuration problem before starting
 another diagnostic series. Never treat rate-limit rejections as a model-quality score.
@@ -34,8 +34,8 @@ silently released. These reserves are conservative controls, not invoices.
 ## Executive report
 
 `scripts/create_onepager.py` takes the suite/configuration, result roots, cost root, budget,
-private guard and environment file. It matches current scenario/source hashes, refuses duplicate
-observations, and writes an English one-page PDF with a detailed CSV. Explicitly documented diagnostic
+optional private guard and environment file. It matches current scenario/source hashes, refuses duplicate
+observations, and writes an English compact PDF with a detailed CSV. Explicitly documented diagnostic
 exclusions may be supplied in an external JSON file; their costs remain in cumulative spending.
 
 The table separates completion, expected route, positive function-call expectations, explicit
@@ -46,7 +46,7 @@ while source conversations remain in their original language. External English s
 can be supplied with `--private-scenario-labels`, keyed by scenario hash; this does not change
 the source cases or prompts. `--private-project-labels` affects only this private viewer.
 
-The viewer compares all four models at project, common-case and individual-case levels.
+The viewer compares all selected models at project, common-case and individual-case levels.
 Common cases retain quality failures. Per-turn first-text and full-flow timings include local
 orchestration and mock responses, excluding quota waits. The anonymized outputs are
 `Benchmark-LLM.pdf`, `Detailed-results.csv`, `Case-coverage.csv` and `Node-coverage.json`.
@@ -62,7 +62,7 @@ Read these limits alongside the results:
 - Automated language flags require review; unvisited turns are not evidence of an observed leak.
 - Calculated token costs and conservative reserves are separate from provider invoices.
 
-The PDF must pass text/metadata publication checks and a visual one-page review before sharing.
+The PDF must pass text/metadata publication checks and a visual layout review before sharing.
 Binary reports remain outside the code repository, even when the contents are anonymized.
 
 ## Reviewed silent closes
@@ -91,7 +91,7 @@ external report note for an accurate description of recorded versus unrun combin
 
 ## Consolidated sample statistics and follow-up views
 
-`Model-consolidated.pdf` adds one page per model with arithmetic mean, minimum,
+`Model-consolidated.pdf` adds a compact report per model with arithmetic mean, minimum,
 maximum and sample count. `Model-consolidated.csv` includes both all-project and
 per-project summaries, with available-case and common-case cohorts. Means use
 individual calls, turns or assertions, rather than averages of project medians.

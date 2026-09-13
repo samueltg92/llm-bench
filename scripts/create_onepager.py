@@ -26,10 +26,12 @@ from llm_bench.review_html import render_review
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
-    for name in ("data-dir", "config-dir", "budget-file", "out", "guard", "env-file"):
+    for name in ("data-dir", "config-dir", "out"):
         parser.add_argument("--" + name, type=Path, required=True)
+    for name in ("budget-file", "guard", "env-file"):
+        parser.add_argument("--" + name, type=Path)
     parser.add_argument("--run-root", type=Path, action="append", required=True)
-    parser.add_argument("--cost-root", type=Path, required=True)
+    parser.add_argument("--cost-root", type=Path)
     parser.add_argument("--exclude-runs-file", type=Path)
     parser.add_argument("--historical-runs-file", type=Path,
                         help="Run IDs retained in a separate historical profile, not the current comparison")
@@ -45,10 +47,14 @@ def main():
                         help="Separate initial summary for profile comparison; never merged into current metrics")
     parser.add_argument("--profile-notes-file", type=Path,
                         help="Audited English profile context keyed by model display name")
+    parser.add_argument("--models", help="Comma-separated catalog keys; defaults to enabled models")
+    parser.add_argument("--include-synthetic", action="store_true", help="Include offline evidence, explicitly labeled synthetic")
     parser.add_argument("--note", action="append", default=[])
     args = parser.parse_args()
-    load_dotenv(external_path(args.env_file), override=True)
-    os.environ["BENCH_PRIVATE_GUARD"] = str(external_path(args.guard))
+    if args.env_file:
+        load_dotenv(external_path(args.env_file), override=True)
+    if args.guard:
+        os.environ["BENCH_PRIVATE_GUARD"] = str(external_path(args.guard))
     pairs = inputs(args.data_dir, [], True)
     expected = {(fingerprint(s.model_dump()), b.source_sha256) for b, s in pairs}
     pair_lookup = {(fingerprint(s.model_dump()), b.source_sha256): (b, s) for b, s in pairs}
@@ -59,8 +65,13 @@ def main():
                        if args.language_policy else {})
     language_reviews = []
     planned = Counter(b.project for b, s in pairs)
-    names = {"mistral-small-4": "Mistral Small 4", "glm-5.3-flash": "GLM 5.3 Flash",
-             "gpt-oss-120b": "GPT-OSS 120B", "gemma-4-31b": "Gemma 4 31B (min.)"}
+    catalog = config.models(args.config_dir / "models.yaml")
+    requested = [key.strip() for key in args.models.split(",")] if args.models else [k for k, m in catalog.items() if m.enabled]
+    if not requested or set(requested) - set(catalog):
+        raise ValueError("Select at least one known model from the catalog")
+    names = {key: catalog[key].display_name or key for key in requested}
+    if len(set(names.values())) != len(names):
+        raise ValueError("Model display names must be unique")
     excluded = set()
     if args.exclude_runs_file:
         excluded = set(json.loads(external_path(args.exclude_runs_file).read_text())["ids"])
@@ -68,6 +79,7 @@ def main():
                   if args.historical_runs_file else set())
     followups = (json.loads(external_path(args.followup_plan).read_text())
                  if args.followup_plan else [])
+    followups = [r for r in followups if r["model_key"] in names]
     replacements = {r["replacement_run_id"]: r for r in followups}
     if len(replacements) != len(followups) or len({r["original_run_id"] for r in followups}) != len(followups):
         raise ValueError("Follow-up plan must identify unique original/replacement pairs")
@@ -85,7 +97,7 @@ def main():
                     if any(run[k] != pair[k] for k in ("model_key", "scenario_sha256", "source_sha256")):
                         raise ValueError("Original run does not match its declared follow-up case")
                     originals_verified.add(run["run_id"])
-                if run["run_id"] in excluded | superseded | historical or run.get("synthetic"):
+                if run["run_id"] in excluded | superseded | historical or (run.get("synthetic") and not args.include_synthetic):
                     continue
                 if run["run_id"] in replacements:
                     replacement = replacements[run["run_id"]]
@@ -102,7 +114,7 @@ def main():
                 transcript = json.loads(transcript_path.read_text())
                 recorded_model = json.loads((path.parent / "manifest.json").read_text())["models"][run["model_key"]]
                 extra = recorded_model.get("extra", {})
-                profile_signatures[run["model_key"]].add(fingerprint({"model": recorded_model["model_id"], "extra": extra}))
+                profile_signatures[run["model_key"]].add(config.deployment_signature(recorded_model))
                 model_extras[run["model_key"]] = extra
                 language_reviews.extend(review_signals(transcript, language_policy))
                 bundle, scenario = pair_lookup[identity]
@@ -124,7 +136,9 @@ def main():
         raise ValueError("Missing completed replacement; original must not be silently removed")
     if superseded - originals_verified:
         raise ValueError("Follow-up plan references an original that was not verified")
-    for path in external_path(args.cost_root).rglob("calls.jsonl"):
+    cost_roots = [args.cost_root] if args.cost_root else args.run_root
+    cost_paths = sorted({path for root in cost_roots for path in external_path(root).rglob("calls.jsonl")})
+    for path in cost_paths:
         for call in read_lines(path):
             cid = call.get("call_id")
             if cid and cid in seen_calls:
@@ -134,7 +148,7 @@ def main():
                 costs[call["model_key"]] += call["cost_usd"]
             else:
                 unknown += 1
-    budget = json.loads(external_path(args.budget_file).read_text())
+    budget = json.loads(external_path(args.budget_file).read_text()) if args.budget_file else {"models": {}}
     reserved = {k: v["reserved_usd"] for k, v in budget["models"].items()}
     data = summarize(runs, calls, planned, names, known_costs=costs, reserved=reserved,
                      notes=args.note)
@@ -143,21 +157,19 @@ def main():
     data["adjudicated_silent_closes"] = len(adjudications)
     data["followup_selected_count"] = len(followups)
     data["historical_profile_records"] = len(historical)
-    effort = model_extras.get("glm-5.3-flash", {}).get("reasoning_effort", "default")
-    if effort not in {"default", "low", "high", "max"}:
-        raise ValueError("Unrecognized GLM reasoning effort")
-    data["model_profiles"] = {
-        names["glm-5.3-flash"]: "Thinking enabled; effort " + effort,
-        names["gemma-4-31b"]: "Thinking disabled: minimal",
-        names["gpt-oss-120b"]: "Low reasoning effort",
-        names["mistral-small-4"]: "Default profile",
-    }
+    data["model_profiles"] = {names[key]: config.profile_description(extra)
+                              for key, extra in model_extras.items()}
+    for name in names.values():
+        data["model_profiles"].setdefault(name, "No recorded observations")
+    data["synthetic"] = any(r.get("synthetic") for r in runs)
+    if data["synthetic"]:
+        data["notes"].insert(0, "SYNTHETIC: offline fixture results, not measured LLM performance.")
     def review_metrics(row, selected_runs, selected_calls, *, include_incomplete=False):
         ids = {r["run_id"] for r in selected_runs}
         decisions = Counter(r["decision"] for r in language_reviews if r["run_id"] in ids)
         row.update(language_confirmed=decisions["confirmed_foreign"],
                    language_pending=decisions["pending"],
-                   language_false_positive=decisions["false_positive_spanish"],
+                   language_false_positive=(decisions["false_positive_spanish"] + decisions["false_positive"]),
                    max_input_tokens=max((c.get("prompt_tokens") or 0 for c in selected_calls
                                          if c.get("usage_source") == "provider"
                                          and c.get("status") in {"ok", "empty_response", "output_limit"}),
@@ -200,7 +212,7 @@ def main():
     data["profile_comparison"] = {"baseline": baseline, "notes": profile_notes}
     language_note = (
         f"Language: {data['language_review'].get('confirmed_foreign', 0)} confirmed flags, "
-        f"{data['language_review'].get('false_positive_spanish', 0)} false positives and "
+        f"{(data['language_review'].get('false_positive_spanish', 0) + data['language_review'].get('false_positive', 0))} false positives and "
         f"{data['language_review'].get('pending', 0)} pending review."
     )
     coverage_note = (
@@ -218,10 +230,8 @@ def main():
     pdf = render(data, out)
     consolidated_pdf = render_consolidated(data, out)
     reader = PdfReader(pdf)
-    if len(reader.pages) != 1:
-        raise ValueError("Expected exactly one PDF page")
     supplement = PdfReader(consolidated_pdf)
-    text = (reader.pages[0].extract_text() + str(reader.metadata) + json.dumps(data)
+    text = ("".join(p.extract_text() for p in reader.pages) + str(reader.metadata) + json.dumps(data)
             + "".join(p.extract_text() for p in supplement.pages) + str(supplement.metadata))
     terms, fragments, words = guard_data()
     problems = violations("docs/benchmark-summary.txt", text.encode(), terms, fragments, words)
@@ -300,7 +310,7 @@ def main():
                   consolidated=data["consolidated"], followup_count=len(followups),
                   model_profiles=data["model_profiles"],
                   historical_count=len(historical),
-                  baseline=baseline, profile_notes=profile_notes,
+                  baseline=baseline, profile_notes=profile_notes, synthetic=data["synthetic"],
                   generated_at=data["generated_at_utc"])
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
@@ -323,10 +333,10 @@ def main():
                                   "nodes_observed": len(observed & nonempty),
                                   "global_prompt_included": bool(bundle.global_system and observed)})
     write_private(out / "Node-coverage.json", node_coverage)
-    write_private(out / "validation.json", {"pages": 1, "publication_guard_passed": True,
+    write_private(out / "validation.json", {"pages": len(reader.pages), "publication_guard_passed": True,
                   "selected_conversations": len(runs), "excluded_diagnostics": len(excluded),
                   "private_review_directory": "../conversation-review"})
-    print(json.dumps({"pages": 1, "guard_passed": True, "observations": len(runs),
+    print(json.dumps({"pages": len(reader.pages), "guard_passed": True, "observations": len(runs),
                       "known_costs": costs, "calls_without_measured_cost": unknown}))
 
 

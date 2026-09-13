@@ -27,9 +27,11 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--models", required=True)
     parser.add_argument("--resume-from", type=Path, action="append", default=[])
-    parser.add_argument("--workers", type=int, default=1, choices=range(1, 5))
-    parser.add_argument("--repetitions", type=int, default=1, choices=range(1, 11))
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--repetitions", type=int, default=1)
     args = parser.parse_args()
+    if args.workers < 1 or args.repetitions < 1:
+        parser.error("workers and repetitions must be positive")
     load_dotenv(external_path(args.env_file), override=True)
     pairs = inputs(args.data_dir, [], True)
     catalog = config.models(args.config_dir / "models.yaml")
@@ -47,8 +49,13 @@ def main():
     done = set()
     for root in [args.out, *args.resume_from]:
         for path in external_path(root).rglob("runs.jsonl"):
+            recorded = json.loads((path.parent / "manifest.json").read_text())["models"]
             for run in read_lines(path):
-                if not run.get("synthetic"):
+                key = run["model_key"]
+                same_deployment = (key in selected and key in recorded and
+                                   config.deployment_signature(recorded[key]) ==
+                                   config.deployment_signature(selected[key].model_dump()))
+                if not run.get("synthetic") and same_deployment and run.get("prompt_mode") == "active_node" and not run.get("dedup"):
                     done.add((run["model_key"], run["scenario_sha256"],
                               run["source_sha256"], run["repetition"]))
 

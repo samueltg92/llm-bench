@@ -5,7 +5,7 @@ import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 
 from .privacy import external_path
@@ -30,10 +30,66 @@ def _save(path, state):
 
 
 def amount(value):
-    result = Decimal(str(value))
+    try:
+        result = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError("Invalid budget amount") from exc
     if not result.is_finite() or result < 0:
         raise ValueError("Invalid budget amount")
     return result.quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
+
+
+def initialize(path: Path, total, model_limits: dict, max_operation=None):
+    """Create a new ledger under the reservation lock; never reset an existing one."""
+    import fcntl
+
+    def limit(value):
+        result = amount(value)
+        if result != Decimal(str(value)):
+            raise ValueError("Budget limits support at most six decimal places")
+        return result
+
+    total = limit(total)
+    operation = total if max_operation is None else limit(max_operation)
+    if operation > total:
+        raise ValueError("Per-operation limit cannot exceed the total budget")
+    if not model_limits or any(not isinstance(key, str) or not key.strip() for key in model_limits):
+        raise ValueError("Define at least one named model budget")
+    state = {
+        "limit_usd": str(total), "reserved_usd": "0.000000",
+        "max_operation_usd": str(operation),
+        "models": {key: {"limit_usd": str(limit(value)), "reserved_usd": "0.000000"}
+                   for key, value in model_limits.items()},
+        "reservations": [],
+    }
+    path = external_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(path.with_suffix(path.suffix + ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if path.exists():
+            raise ValueError("Budget ledger already exists; initialization cannot reset spending")
+        _save(path, state)
+    return state
+
+
+def status(path: Path):
+    """Available application capacity, not a provider credit balance or invoice."""
+    state = json.loads(external_path(path).read_text())
+
+    def pool(value):
+        cap, used = amount(value["limit_usd"]), amount(value["reserved_usd"])
+        if used > cap:
+            raise ValueError("Budget reservations exceed the configured limit")
+        return {"limit_usd": str(cap), "reserved_usd": str(used), "remaining_usd": str(cap - used)}
+
+    result = {**pool(state), "max_operation_usd": str(amount(state["max_operation_usd"]))}
+    if "models" in state:
+        result["models"] = {key: pool(value) for key, value in state["models"].items()}
+        if sum(amount(v["reserved_usd"]) for v in state["models"].values()) != amount(state["reserved_usd"]):
+            raise ValueError("Inconsistent cumulative and per-model budget")
+    result["basis"] = "conservative_application_reservations_not_provider_invoices"
+    return result
 
 
 def call_bound(model, price, output_tokens):

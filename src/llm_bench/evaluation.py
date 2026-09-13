@@ -11,7 +11,10 @@ def detector():
     return LanguageDetectorBuilder.from_all_languages().with_low_accuracy_mode().build()
 
 
-def language_check(text: str) -> dict:
+def language_check(text: str, allowed_languages=None) -> dict:
+    allowed = {code.lower() for code in (allowed_languages if allowed_languages is not None else ["es"])}
+    if not allowed:
+        return {"status": "disabled", "foreign_word_ratio": None, "segments": []}
     words = re.findall(r"[^\W\d_]+", text, re.UNICODE)
     if len(words) < 4:
         return {"status": "unknown", "foreign_word_ratio": None, "segments": []}
@@ -26,7 +29,7 @@ def language_check(text: str) -> dict:
             continue
         checked += count
         language = span.language.iso_code_639_1.name.lower()
-        if language != "es":
+        if language not in allowed:
             foreign += count
             segments.append(
                 {
@@ -42,6 +45,7 @@ def language_check(text: str) -> dict:
         "foreign_word_ratio": ratio,
         "segments": segments,
         "method": "lingua_low_accuracy_confidence_0.8_min_4_words",
+        "allowed_languages": sorted(allowed),
     }
 
 
@@ -68,6 +72,7 @@ def evaluate_turn(
             c
             for c in tools
             if c["name"] == expected.tool
+            and c.get("tool_mode", "native") == "native"
             and c["valid"]
             and subset_match(c["arguments"], expected.arguments)
         ]

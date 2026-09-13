@@ -227,9 +227,14 @@ def context_status(tokens, window, bench):
 def resolve_tool(call, bundle, scenario, active, variables, allowed_names, routed=False):
     name = call["function"]["name"]
     before = active
+    routing_name = bundle.routing.tool_name
     tool = next((t for t in bundle.tools if t.name == name), None)
     if tool is None:
         tool = next((t.tool() for t in scenario.platform_tools if t.name == name), None)
+    if name == routing_name and bundle.node(active).transitions:
+        from .extract import route_tool
+
+        tool = route_tool(list(dict.fromkeys(t for n in bundle.nodes for t in n.transitions)), bundle.routing, bundle.orchestration_language)
     reason, arguments = None, {}
     try:
         arguments = json.loads(call["function"]["arguments"])
@@ -244,8 +249,8 @@ def resolve_tool(call, bundle, scenario, active, variables, allowed_names, route
             prerequisite = scenario.tool_prerequisites.get(name, {})
             if any(variables.get(k) != v for k, v in prerequisite.items()):
                 reason = "prerequisite_not_met"
-            elif name == "route_node":
-                target = arguments.get("target_node")
+            elif name == routing_name:
+                target = arguments.get(bundle.routing.argument_name)
                 if target not in bundle.node(active).transitions:
                     reason = "transition_not_allowed"
                 else:
@@ -256,7 +261,7 @@ def resolve_tool(call, bundle, scenario, active, variables, allowed_names, route
     started = time.perf_counter_ns()
     if reason:
         response = {"ok": False, "error": reason}
-    elif name == "route_node":
+    elif name == routing_name:
         # Routing is local transport, not a backend fixture. Missing-backend
         # defaults must never prevent a valid conversation transition.
         response = {"ok": True, "active_node": bundle.node(active).name}
@@ -268,14 +273,16 @@ def resolve_tool(call, bundle, scenario, active, variables, allowed_names, route
             time.sleep(mock.delay_ms / 1000)
         variables.update(mock.state_updates)
         response = copy.deepcopy(mock.response)
+        if name in bundle.node(before).tool_transitions:
+            active = bundle.node(before).tool_transitions[name]
     ended = time.perf_counter_ns()
     event = {
         "name": name,
         "arguments": arguments,
         "valid": reason is None,
         "error": reason,
-        "mock_error": mock.error and reason is None and name != "route_node",
-        "schema_verified": bool(tool and (not tool.synthetic or name == "route_node")),
+        "mock_error": mock.error and reason is None and name != routing_name,
+        "schema_verified": bool(tool and (not tool.synthetic or name == routing_name)),
         "duration_ms": (ended - started) / 1e6,
         "execution_mode": "mock",
         "executed_ns": ended,
@@ -440,6 +447,8 @@ def conversation(
                         status = "tool_iteration_limit"
                     else:
                         allowed_names = set(bundle.node(active).tool_names)
+                        if bundle.node(active).transitions:
+                            allowed_names.add(bundle.routing.tool_name)
                         allowed_names.update(
                             tool.name for tool in scenario.platform_tools
                             if any(bundle.node(ref).id == active for ref in tool.nodes)
@@ -451,6 +460,7 @@ def conversation(
                                 call, bundle, scenario, active, variables, allowed_names, routed
                             )
                             event["call_id"] = row["call_id"]
+                            event["tool_mode"] = row.get("tool_mode", "native")
                             if active != previous:
                                 path.append(bundle.node(active).name)
                                 routed = True
@@ -484,7 +494,7 @@ def conversation(
                 if status != "ok" or final_response:
                     break
             assertions = evaluate_turn(
-                turn,
+                turn.model_copy(update={"expected_node": bundle.node(turn.expected_node).name}) if turn.expected_node else turn,
                 turn_index,
                 turn_text,
                 turn_tools,
@@ -516,7 +526,7 @@ def conversation(
                     ),
                     "rate_limit_wait_ms": turn_rate_wait_ms,
                     "assertions": assertions,
-                    "language": language_check(turn_text),
+                    "language": language_check(turn_text, bundle.allowed_languages),
                 }
             )
             if status != "ok" or terminal:
@@ -560,10 +570,12 @@ def conversation(
             "degraded": degraded,
             "effective_modes": sorted({c.get("prompt_mode_effective", effective) for c in calls}),
             "routing_path": path,
-            "expected_path_match": path_matches(path, scenario.expected_path),
+            "expected_path_match": path_matches(path, [bundle.node(ref).name for ref in scenario.expected_path]),
             "turns_completed": sum(t["completed"] for t in turns),
             "llm_calls": len(calls),
             "tool_calls_total": sum(c.get("tool_calls_count", 0) for c in calls),
+            "native_tool_calls": sum(c.get("tool_calls_count", 0) for c in calls if c.get("tool_mode") == "native"),
+            "emulated_tool_calls": sum(c.get("tool_calls_count", 0) for c in calls if c.get("tool_mode") == "text_protocol"),
             "invalid_tool_calls": sum(not t["valid"] for t in all_tools),
             "mock_failures": sum(t["mock_error"] for t in all_tools),
             "tool_schema_unverified": sum(not t["schema_verified"] for t in all_tools),

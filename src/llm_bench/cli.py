@@ -84,6 +84,62 @@ def extract(
 
 
 @app.command()
+def import_bundle(
+    input: Annotated[Path, typer.Option(exists=True)],
+    out: Annotated[Path, typer.Option()],
+):
+    """Import a neutral JSON bundle; no platform-specific export is required."""
+    import hashlib
+
+    from .bundle import Bundle
+    from .extract import save_bundle
+
+    external_path(out)
+    raw = input.read_bytes()
+    data = json.loads(raw)
+    data["source_sha256"] = hashlib.sha256(raw).hexdigest()
+    data.setdefault("display_name", "Project " + data["project"].split("_")[-1])
+    data.setdefault("orchestration_language", "en")
+    data.setdefault("allowed_languages", ["en"])
+    bundle = Bundle.model_validate(data)
+    save_bundle(bundle, out)
+    emit({"project": bundle.project, "nodes": len(bundle.nodes), "tools": len(bundle.tools),
+          "source_sha256": bundle.source_sha256})
+
+
+@app.command()
+def budget_init(
+    budget_file: Annotated[Path, typer.Option()],
+    total: Annotated[str, typer.Option(help="Total USD limit shared by all selected models")],
+    model_limit: Annotated[list[str], typer.Option("--model-limit", help="Repeat KEY=USD for each model")],
+    per_operation: Annotated[str | None, typer.Option(help="Maximum reservation per operation; defaults to total")] = None,
+):
+    """Create an external budget with global/model limits; refuses to overwrite."""
+    from .budget import initialize, status
+
+    limits = {}
+    for item in model_limit:
+        key, separator, value = item.partition("=")
+        key = key.strip()
+        if not separator or not key or key in limits:
+            raise typer.BadParameter("Use unique model keys as --model-limit KEY=USD")
+        limits[key] = value.strip()
+    try:
+        initialize(budget_file, total, limits, per_operation)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    emit(status(budget_file))
+
+
+@app.command()
+def budget_status(budget_file: Annotated[Path, typer.Option(exists=True)]):
+    """Show total/per-model limits, reservations and remaining local capacity."""
+    from .budget import status
+
+    emit(status(budget_file))
+
+
+@app.command()
 def doctor(
     config_dir: Path = Path("config"),
     env_file: Path | None = None,

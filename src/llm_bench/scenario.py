@@ -18,6 +18,12 @@ class Expectation(Strict):
     min_calls: int = Field(default=1, ge=0)
     max_calls: int | None = Field(default=None, ge=0)
 
+    @model_validator(mode="after")
+    def ordered_limits(self):
+        if self.max_calls is not None and self.max_calls < self.min_calls:
+            raise ValueError("max_calls must be at least min_calls")
+        return self
+
 
 class Rule(Strict):
     id: str
@@ -88,6 +94,10 @@ class Scenario(Strict):
         for rule in self.rules:
             if rule.kind.endswith("regex"):
                 re.compile(str(rule.value))
+            if rule.kind == "max_words" and (not str(rule.value).isdigit() or int(rule.value) < 1):
+                raise ValueError("max_words must be a positive integer")
+            if rule.turn is not None and rule.turn >= min(len(self.turns), self.max_turns):
+                raise ValueError("Rule refers to an unscheduled turn")
         return self
 
     def validate_bundle(self, bundle: Bundle):
@@ -107,11 +117,23 @@ class Scenario(Strict):
         ]:
             raise ValueError("Subset must include the starting node")
         for a, b in zip(self.expected_path, self.expected_path[1:]):
-            if bundle.node(b).id not in bundle.node(a).transitions.values():
+            target = bundle.node(b).id
+            pending = [*bundle.node(a).transitions.values(), *bundle.node(a).tool_transitions.values()]
+            seen = set()
+            while pending:
+                current = pending.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                node = bundle.node(current)
+                pending.extend([*node.transitions.values(), *node.tool_transitions.values()])
+            if target not in seen:
                 raise ValueError("Expected path contains an impossible transition")
         names = {t.name for t in bundle.tools}
+        if any(n.transitions for n in bundle.nodes):
+            names.add(bundle.routing.tool_name)
         for tool in self.platform_tools:
-            if tool.name == "route_node" or tool.name in names:
+            if tool.name == bundle.routing.tool_name or tool.name in names:
                 raise ValueError("Platform tool conflicts with an existing tool")
             for ref in tool.nodes:
                 bundle.node(ref)
@@ -121,6 +143,9 @@ class Scenario(Strict):
 
             jsonschema.Draft202012Validator.check_schema(tool.parameters_schema)
             names.add(tool.name)
+        for rule in self.rules:
+            if rule.kind == "tool_before_text" and rule.value not in names:
+                raise ValueError("Rule refers to an unknown tool")
         for turn in self.turns:
             if turn.expected_node:
                 bundle.node(turn.expected_node)

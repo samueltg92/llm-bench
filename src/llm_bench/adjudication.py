@@ -37,7 +37,7 @@ def silent_close(transcript, scenario, bundle, policy):
                for pattern in policy.get("farewell_patterns", [])):
         return None
     routes = [tool for tool in turns[-1].get("tools", [])
-              if tool.get("valid") and tool.get("name") == "route_node"
+              if tool.get("valid") and tool.get("name") == bundle.routing.tool_name
               and tool.get("active_node_after") == node.id]
     if not routes or turns[-1].get("completed"):
         return None

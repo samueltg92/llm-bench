@@ -17,7 +17,7 @@ def distribution(values):
 def consolidate(runs, calls, interpreted, language_reviews, model_names, planned):
     result = []
     common = common_cohort(runs, model_names)
-    for cohort, population in [("Available cases", runs), ("Same cases across all 4", common)]:
+    for cohort, population in [("Available cases", runs), ("Same cases across all models", common)]:
         for project in [None, *sorted(planned)]:
             scoped = [r for r in population if project is None or r["project"] == project]
             planned_count = planned[project] if project else sum(planned.values())
@@ -52,11 +52,11 @@ def consolidate(runs, calls, interpreted, language_reviews, model_names, planned
                 add("Explicit case rules", "%", "explicit assertion", [100 * a["pass"] for a in rule_checks])
                 for label, field in [("TTFT", "ttft_ms"), ("Full latency", "total_latency_ms"),
                                      ("First native tool delta", "first_tool_ms")]:
-                    add(label, "s", "call in a complete conversation", [c[field] / 1000 for c in timed if c.get(field) is not None])
+                    add(label, "s", "call in a complete conversation", [c[field] / 1000 for c in timed if c.get(field) is not None and (field != "first_tool_ms" or c.get("tool_mode", "native") == "native")])
                 for label, field in [("First user-facing text", "first_text_ms"), ("Flow latency", "total_ms")]:
                     add(label, "s", "turn in a complete conversation", [t[field] / 1000 for t in turns if t.get(field) is not None])
                 for label, field in [("Native function calls", "tool_calls_total"), ("Invalid function calls", "invalid_tool_calls")]:
-                    add(label, "calls", "evaluable conversation", [r.get(field, 0) for r in evaluable])
+                    add(label, "calls", "evaluable conversation", [r.get("native_tool_calls", r.get(field, 0)) if field == "tool_calls_total" else r.get(field, 0) for r in evaluable])
                 for label, decision in [("Confirmed language flags", "confirmed_foreign"), ("Pending language flags", "pending")]:
                     add(label, "flags", "evaluable conversation", [decisions[r["run_id"], decision] for r in evaluable])
                 add("Accepted input size", "tokens", "provider-measured accepted call", [c.get("prompt_tokens") for c in accepted])
@@ -74,7 +74,7 @@ def consolidate(runs, calls, interpreted, language_reviews, model_names, planned
 
 
 def render_consolidated(data, out):
-    """Four compact model pages supplement the one-page project comparison."""
+    """Compact model pages supplement the one-page project comparison."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
@@ -95,7 +95,7 @@ def render_consolidated(data, out):
         p.drawOn(c, 34, y - h)
         return y - h - 10
 
-    models = list(data["known_costs"])
+    models = list(dict.fromkeys(r["model"] for r in data["consolidated"]))
     for page, model in enumerate(models, 1):
         c.setFillColor(navy)
         c.rect(0, height - 100, width, 100, fill=1, stroke=0)
@@ -103,7 +103,7 @@ def render_consolidated(data, out):
         c.setFont("Helvetica-Bold", 20)
         c.drawString(34, height - 40, model)
         c.setFont("Helvetica", 10)
-        c.drawString(34, height - 64, "Consolidated metrics | All projects | Available cases")
+        c.drawString(34, height - 64, ("SYNTHETIC | " if data.get("synthetic") else "") + "Consolidated metrics | All projects | Available cases")
         c.setFont("Helvetica", 9)
         c.drawString(34, height - 84, data.get("model_profiles", {}).get(model, "Profile recorded in source manifest"))
         rows = [r for r in data["consolidated"] if r["model"] == model and r["project"] == "All projects" and r["cohort"] == "Available cases"]
@@ -125,7 +125,7 @@ def render_consolidated(data, out):
         y = height - 132 - th
         y = paragraph("<b>How to read.</b> Arithmetic means use individual samples, not averages of project medians. N is the sample count. Missing observations stay blank. Percentage checks use 100 for pass and 0 for fail; their minimum and maximum are therefore binary.", y)
         y = paragraph("<b>Populations.</b> Timing uses calls or turns from complete conversations, excluding quota waits. Quality includes evaluable failures. Input, reasoning and cost measurements also include recorded portions of incomplete conversations. Backend tool responses are simulated. Detailed sample units and matched-case summaries are in Model-consolidated.csv and the private viewer.", y)
-        y = paragraph(f"<b>Cumulative calculated cost, including earlier attempts and diagnostics:</b> USD {data['known_costs'][model]:.5f}. This total differs from per-call and per-conversation averages. Unknown usage is not assumed free; these calculations are not provider invoices.", y)
+        y = paragraph(f"<b>Cumulative calculated cost, including earlier attempts and diagnostics:</b> USD {data['known_costs'].get(model, 0):.5f}. This total differs from per-call and per-conversation averages. Unknown usage is not assumed free; these calculations are not provider invoices.", y)
         if y < 42:
             raise ValueError("Consolidated page overflow")
         c.setFont("Helvetica", 7)

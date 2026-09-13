@@ -21,6 +21,8 @@ def build(
         selected = [n for n in bundle.nodes if n.id in ids]
     else:
         selected = bundle.nodes
+    english = bundle.orchestration_language == "en"
+    route = bundle.routing
     parts = [bundle.global_system]
     if effective in ("single_node", "active_node"):
         parts.append(node.prompt)
@@ -28,38 +30,50 @@ def build(
         common, unique = dedup_blocks(selected) if dedup else ([], {})
         if common:
             parts.append(
-                "# REGLAS COMPARTIDAS POR TODOS LOS NODOS SELECCIONADOS\n" + "\n\n".join(common)
+                ("# SHARED RULES\n" if english else "# REGLAS COMPARTIDAS POR TODOS LOS NODOS SELECCIONADOS\n") + "\n\n".join(common)
             )
-        parts.append("# MAPA DE NODOS\nNodo inicial: " + bundle.node(bundle.start_node).name)
+        parts.append(("# NODE MAP\nInitial node: " if english else "# MAPA DE NODOS\nNodo inicial: ") + bundle.node(bundle.start_node).name)
         for n in selected:
             parts.append(
-                f"## NODO: {n.name}\nTransiciones: {', '.join(n.transitions) or 'ninguna'}\n"
+                (f"## NODE: {n.name}\nTransitions: {', '.join(n.transitions) or 'none'}\n" if english else f"## NODO: {n.name}\nTransiciones: {', '.join(n.transitions) or 'ninguna'}\n")
                 + unique.get(n.id, n.prompt)
             )
     if effective != "single_node":
-        parts.append(
-            f"# ESTADO DEL FLUJO\nNodo activo: {node.name}\n"
-            "Solo ejecuta las reglas del nodo activo. Cambia de nodo mediante route_node.\n"
-            f"Destinos permitidos: {', '.join(node.transitions) or 'ninguno'}"
-        )
-        parts.append(
-            "Contrato de transporte: las referencias de los guiones a route_node_all o "
-            "route_node(node_name=...) se ejecutan con la herramienta route_node y el "
-            "argumento target_node. Usa exactamente un destino permitido. "
-            "Las reglas de negocio del nodo siguen siendo obligatorias."
-        )
+        if english:
+            parts.append(
+                f"# FLOW STATE\nActive node: {node.name}\n"
+                "Follow only the active node's rules.\n"
+                + (f"Route with {route.tool_name} using argument {route.argument_name}.\n" if node.transitions else "")
+                +
+                f"Allowed destinations: {', '.join(node.transitions) or 'none'}"
+            )
+        else:
+            parts.append(
+                f"# ESTADO DEL FLUJO\nNodo activo: {node.name}\n"
+                "Solo ejecuta las reglas del nodo activo.\n"
+                + (f"Cambia de nodo mediante {route.tool_name}.\n" if node.transitions else "")
+                +
+                f"Destinos permitidos: {', '.join(node.transitions) or 'ninguno'}"
+            )
+        if route.transport_note:
+            parts.append(route.transport_note)
+        if node.tool_transitions:
+            parts.append(("# TRANSITIONS AFTER SUCCESSFUL SIMULATED TOOLS\n" if english else
+                          "# TRANSICIONES TRAS HERRAMIENTAS SIMULADAS EXITOSAS\n")
+                         + json.dumps({name: bundle.node(target).name
+                                       for name, target in node.tool_transitions.items()}, ensure_ascii=False))
     aliases = [f"{t.original_name} => {t.name}" for t in bundle.tools if t.original_name != t.name]
     if aliases:
-        parts.append("# NOMBRES DE HERRAMIENTAS ACEPTADOS POR LA API\n" + "\n".join(aliases))
+        parts.append(("# API TOOL NAMES\n" if english else "# NOMBRES DE HERRAMIENTAS ACEPTADOS POR LA API\n") + "\n".join(aliases))
     if variables:
         parts.append(
-            "# DATOS Y ESTADO DISPONIBLES EN ESTA SIMULACIÓN\n"
+            ("# SIMULATION DATA AND STATE\n" if english else "# DATOS Y ESTADO DISPONIBLES EN ESTA SIMULACIÓN\n")
             + json.dumps(variables, ensure_ascii=False, sort_keys=True)
         )
     system = render("\n\n".join(p for p in parts if p), variables)
     names = {name for n in selected for name in n.tool_names}
     tools = [
-        copy.deepcopy(t.api()) for t in bundle.tools if t.name in names and t.name != "route_node"
+        copy.deepcopy(t.api()) for t in bundle.tools if t.name in names and t.name != route.tool_name
     ]
     selected_ids = {n.id for n in selected}
     for tool in scenario.platform_tools:
@@ -67,7 +81,7 @@ def build(
             tools.append(tool.tool().api())
     if node.transitions and effective != "single_node":
         # Even full mode only authorizes transitions from the actual active node.
-        tools.append(route_tool(list(node.transitions)).api())
+        tools.append(route_tool(list(node.transitions), route, bundle.orchestration_language).api())
     return system, tools, effective
 
 
@@ -78,8 +92,8 @@ def prepare(system: str, history: list[dict], tools: list[dict], model) -> tuple
     wire_tools = copy.deepcopy(tools)
     if tool_mode == "text_protocol":
         system += (
-            "\n# PROTOCOLO DE TOOLS EN TEXTO\nEmite exclusivamente "
-            '<<TOOL_CALL>{"name":"nombre","arguments":{}}<END> para invocar una función.\n'
+            "\n# TEXT TOOL PROTOCOL\nTo invoke a function, emit only "
+            '<<TOOL_CALL>{"name":"function_name","arguments":{}}<END>.\n'
             + json.dumps(tools, ensure_ascii=False)
         )
         wire_tools = []
