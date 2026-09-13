@@ -41,6 +41,42 @@ def silent_close(transcript, scenario, bundle, policy):
               and tool.get("active_node_after") == node.id]
     if not routes or turns[-1].get("completed"):
         return None
+    return _complete_silent(transcript, bundle, policy, "reviewed_terminal_silence_after_farewell")
+
+
+def silent_handoff(transcript, scenario, bundle, policy):
+    """A reviewed successful terminal transfer needs no subsequent spoken response."""
+    if policy.get("source_sha256") != bundle.source_sha256:
+        return None
+    calls, turns = transcript.get("calls", []), transcript.get("turns", [])
+    if transcript["summary"]["status"] != "empty_response" or len(calls) < 2 or not turns:
+        return None
+    if len(turns) != min(len(scenario.turns), scenario.max_turns) or turns[-1].get("completed"):
+        return None
+    last = calls[-1]
+    if last["status"] != "empty_response" or last.get("finish_reason") not in {
+        "stop", "STOP", "FinishReason.STOP",
+    } or last.get("tool_calls_count") or any(c["status"] != "ok" for c in calls[:-1]):
+        return None
+    tools = turns[-1].get("tools", [])
+    if not tools:
+        return None
+    tool = tools[-1]
+    allowed = policy.get("handoff_by_node", {}).get(last["active_node_before"], [])
+    if (tool.get("name") not in allowed or not tool.get("valid")
+            or tool.get("mock_error") is not False
+            or not tool.get("call_id") or tool["call_id"] != calls[-2].get("call_id")):
+        return None
+    if not any(a["id"] == "expected_tool:" + tool["name"] and a["pass"]
+               for a in turns[-1].get("assertions", [])):
+        return None
+    if not any(re.search(pattern, turns[-1]["text"], re.I)
+               for pattern in policy.get("handoff_patterns", [])):
+        return None
+    return _complete_silent(transcript, bundle, policy, "reviewed_silence_after_terminal_handoff")
+
+
+def _complete_silent(transcript, bundle, policy, rule):
     result = copy.deepcopy(transcript)
     result["calls"][-1].update(status="ok", silent_terminal_adjudicated=True)
     result["turns"][-1]["completed"] = True
@@ -49,7 +85,7 @@ def silent_close(transcript, scenario, bundle, policy):
     summary["turns_completed"] += 1
     summary["known_successful_cost_usd"] = sum(c.get("cost_usd") or 0 for c in result["calls"])
     result["adjudication"] = {
-        "rule": "reviewed_terminal_silence_after_farewell",
+        "rule": rule,
         "policy_id": policy["id"], "source_sha256": bundle.source_sha256,
         "original_status": "empty_response", "interpreted_status": "ok",
         "raw_evidence_unchanged": True,

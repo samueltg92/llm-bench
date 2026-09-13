@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from pypdf import PdfReader
 
 from llm_bench import config
-from llm_bench.adjudication import silent_close
+from llm_bench.adjudication import silent_close, silent_handoff
 from llm_bench.experiment import inputs
 from llm_bench.language_review import review_signals
 from llm_bench.onepager import common_cohort, median, render, summarize
@@ -73,6 +73,8 @@ def main():
                 bundle, scenario = pair_lookup[identity]
                 corrected = silent_close(transcript, scenario, bundle,
                                          policies.get(run["project"], {}))
+                corrected = corrected or silent_handoff(transcript, scenario, bundle,
+                                                         policies.get(run["project"], {}))
                 if corrected:
                     run = corrected["summary"]
                     adjudications.append({"run_id": run["run_id"], **corrected["adjudication"]})
