@@ -3,7 +3,10 @@ from llm_bench.review_html import render_review
 
 def test_private_viewer_cannot_execute_conversation_markup(tmp_path):
     path = tmp_path / "review.html"
-    render_review([{"history": [{"role": "assistant", "content": "</script><script>alert(1)</script>"}]}], path)
+    markup = "</script><script>alert(1)</script>"
+    render_review([{"history": [{"role": "assistant", "content": markup}]}], path,
+                  baseline={"model_profiles": {"Model A": markup}},
+                  profile_notes={"Model A": markup})
     text = path.read_text()
     assert "</script><script>alert(1)" not in text
     assert "\\u003c/script>" in text

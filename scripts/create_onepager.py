@@ -41,6 +41,10 @@ def main():
                         help="Private English scenario titles and descriptions, keyed by scenario hash")
     parser.add_argument("--followup-plan", type=Path,
                         help="Explicit original/replacement run pairs; originals remain in a separate baseline")
+    parser.add_argument("--baseline-summary", type=Path,
+                        help="Separate initial summary for profile comparison; never merged into current metrics")
+    parser.add_argument("--profile-notes-file", type=Path,
+                        help="Audited English profile context keyed by model display name")
     parser.add_argument("--note", action="append", default=[])
     args = parser.parse_args()
     load_dotenv(external_path(args.env_file), override=True)
@@ -180,6 +184,20 @@ def main():
             review_metrics(row, selected, [c for c in calls if c.get("run_id") in ids])
     data["language_review"] = dict(Counter(r["decision"] for r in language_reviews))
     data["consolidated"] = consolidate(runs, calls, interpreted, language_reviews, names, planned)
+    baseline = {}
+    if args.baseline_summary:
+        initial = json.loads(external_path(args.baseline_summary).read_text())
+        if not initial.get("consolidated") or not initial.get("model_profiles"):
+            raise ValueError("Baseline must include consolidated statistics and recorded profiles")
+        baseline = {key: initial[key] for key in ("consolidated", "model_profiles")}
+    profile_notes = (json.loads(external_path(args.profile_notes_file).read_text())
+                     if args.profile_notes_file else {})
+    if not isinstance(profile_notes, dict) or any(
+        key not in names.values() or not isinstance(value, str)
+        for key, value in profile_notes.items()
+    ):
+        raise ValueError("Profile notes must map known model display names to text")
+    data["profile_comparison"] = {"baseline": baseline, "notes": profile_notes}
     language_note = (
         f"Language: {data['language_review'].get('confirmed_foreign', 0)} confirmed flags, "
         f"{data['language_review'].get('false_positive_spanish', 0)} false positives and "
@@ -282,6 +300,7 @@ def main():
                   consolidated=data["consolidated"], followup_count=len(followups),
                   model_profiles=data["model_profiles"],
                   historical_count=len(historical),
+                  baseline=baseline, profile_notes=profile_notes,
                   generated_at=data["generated_at_utc"])
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
