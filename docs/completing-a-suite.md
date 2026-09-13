@@ -35,13 +35,21 @@ silently released. These reserves are conservative controls, not invoices.
 
 `scripts/create_onepager.py` takes the suite/configuration, result roots, cost root, budget,
 private guard and environment file. It matches current scenario/source hashes, refuses duplicate
-observations, and writes a one-page PDF with a detailed CSV. Explicitly documented diagnostic
+observations, and writes an English one-page PDF with a detailed CSV. Explicitly documented diagnostic
 exclusions may be supplied in an external JSON file; their costs remain in cumulative spending.
 
 The table separates completion, expected route, positive function-call expectations, explicit
 prompt assertions, TTFT, full response latency and calculated cost. Latency uses completed
 conversations; quality percentages exclude provider/context rejections. Missing expectations are
-unknown rather than a perfect score. The full transcript review is in a separate private directory.
+unknown rather than a perfect score. The full transcript review is in a separate private directory. Its interface is in English,
+while source conversations remain in their original language. External English scenario labels
+can be supplied with `--private-scenario-labels`, keyed by scenario hash; this does not change
+the source cases or prompts. `--private-project-labels` affects only this private viewer.
+
+The viewer compares all four models at project, common-case and individual-case levels.
+Common cases retain quality failures. Per-turn first-text and full-flow timings include local
+orchestration and mock responses, excluding quota waits. The anonymized outputs are
+`Benchmark-LLM.pdf`, `Detailed-results.csv`, `Case-coverage.csv` and `Node-coverage.json`.
 
 Read these limits alongside the results:
 

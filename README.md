@@ -262,10 +262,16 @@ aceptada por la API, sin inferir que todos los nodos del origen fueron evaluados
 
 `Conversaciones.html`, en el directorio privado de revisión, compara todos los
 modelos simultáneamente, con métricas por proyecto y escenario y filtro por turno.
-La opción «Mismos casos en los 4» intersecta casos evaluables, conservando los fallos
+La opción «Same cases across all 4» intersecta casos evaluables, conservando los fallos
 de calidad. En un escenario se muestran también latencias de llamadas aceptadas
 si la conversación quedó incompleta; el agregado del proyecto usa conversaciones completas.
 `--private-project-labels` acepta nombres privados por alias, usados exclusivamente
 en ese visor. Incluye los historiales originales y los
 resultados simulados de tools; nunca debe publicarse. Los cierres silenciosos y las
 señales de idioma revisadas se documentan por separado, sin editar los registros.
+
+El PDF y la interfaz de revisión se generan en inglés; las conversaciones conservan
+su idioma original. `--private-scenario-labels` admite títulos y descripciones en inglés
+en un JSON externo, indexados por hash de escenario, sin modificar los casos de prueba.
+Los CSV se llaman `Detailed-results.csv` y `Case-coverage.csv`;
+`Node-coverage.json` contiene la cobertura por nodo.
