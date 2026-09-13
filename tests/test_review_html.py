@@ -78,3 +78,38 @@ def test_all_consolidated_metrics_have_help():
 
     rows = consolidate([], [], {}, [], {"model-a": "Model A"}, {"project_1": 1})
     assert {r["metric"] for r in rows} <= METRIC_HELP.keys()
+
+
+def test_shareable_contains_readable_results_before_javascript(tmp_path):
+    from html.parser import HTMLParser
+
+    class TextReader(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.text = []
+
+        def handle_data(self, data):
+            self.text.append(data)
+
+    records = [{"project": "Project 1", "case": str(i), "model": "Model A", "status": "ok",
+                "metrics": {"tested": 1, "cost_usd": i / 100, "ttft_s": i + .25}, "history": []}
+               for i in [1, 2]]
+    stat = {"project": "All projects", "cohort": "Available cases", "model": "Model A",
+            "metric": "TTFT", "unit": "s", "sample": "call in a complete conversation",
+            "mean": 12.34, "min": 10, "max": 15, "n": 2}
+    path = tmp_path / "readable.html"
+    render_review(records, path, consolidated=[stat], baseline={"consolidated": [stat]},
+                  model_profiles={"Model A": '<img src=x onerror="alert(1)">'},
+                  shareable=True, publication_check=lambda _: None)
+    html = path.read_text()
+    static = html.split('<main id="static-report">')[1].split('</main>')[0]
+    assert '<main id="static-report" hidden' not in html
+    assert '<main id="interactive-report" hidden>' in html
+    assert '<script' not in static and '<img' not in static
+    reader = TextReader()
+    reader.feed(static)
+    text = ' '.join(reader.text)
+    for expected in ["12.34", "10.00–15.00", "N = 2", "Scenario 1", "Scenario 2",
+                     "1.25 s", "2.25 s", "USD 0.02000", "Initial vs current measurements",
+                     "Reasoning-only deltas do not stop this timer"]:
+        assert expected in text

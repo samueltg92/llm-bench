@@ -5,6 +5,7 @@ import json
 from .privacy import write_private
 from .review_metrics import METRIC_HELP
 from .review_share import shareable_data
+from .review_static import render_static
 
 
 def render_review(records, path, *, project_rows=None, common_rows=None,
@@ -27,6 +28,7 @@ def render_review(records, path, *, project_rows=None, common_rows=None,
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     document = TEMPLATE.replace("__RECORDS__", payload)
     if shareable:
+        document = document.replace('<main>', render_static(data) + '<main id="interactive-report" hidden>', 1)
         document = document.replace(
             "Selected LLMs: metrics, scenarios and conversations in one comparison.",
             "Selected LLMs: results by project and scenario, consolidated metrics and reasoning profiles.",
@@ -67,12 +69,18 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px ui-monospace,monospace
 .metric-help:focus-visible{outline:2px solid #087f8c;outline-offset:3px}.metric-help::after{content:' ⓘ';color:#087f8c;font-size:12px}
 .metric-tooltip{position:fixed;z-index:20;max-width:min(390px,calc(100vw - 24px));padding:14px 16px;background:#142b42;color:white;border-radius:8px;box-shadow:0 6px 24px #142b4240;font-size:13px;line-height:1.55;max-height:60vh;overflow:auto}
 .metric-tooltip b{display:block;margin-bottom:7px}.metric-tooltip p{margin:0}
+.static-project>summary{font-size:20px;margin-bottom:18px}.static-project h3{margin-top:22px}
+.static-table{margin:12px 0 22px}.static-help{margin:0}.static-help summary{color:#087f8c}
+.static-scenario{margin:12px 0;border-top:1px solid #cad5df;padding-top:12px}
+#static-report p{line-height:1.55}.static-table td:first-child{background:#f2f6f9}
+@media(max-width:600px){.static-table{min-width:680px}.static-table td:first-child,.static-table th:first-child{position:sticky;left:0;z-index:1}.static-table th:first-child{background:#142b42}.box{padding:12px}}
 @media print{header,main{padding:12px}.scroll{overflow:visible}.panes{min-width:0;grid-template-columns:repeat(2,1fr)}.metrics{min-width:0;font-size:10px}}
 </style>
 <header><h1>Benchmark by project</h1><p>Selected LLMs: metrics, scenarios and conversations in one comparison.</p>
 <p class="stamp" id="stamp"></p><p class="stamp" id="privacy-note">Private file with project names and original content. Works offline; tool responses are simulated. Source conversations retain their original language.</p></header>
 <main><label>Project<select id="project"></select></label><label>Simulated scenario<select id="case"></select></label>
 <p class="description">Hover over, focus or tap a metric name for its definition and measurement method. All data and explanations are embedded in this file; no internet connection is needed.</p>
+<button id="show-reading-view" hidden>Complete reading view</button>
 <section class="box"><div class="toolbar"><h2 id="metric-title">Project metrics</h2>
 <button id="scope-project" aria-pressed="true">Entire project</button><button id="scope-common" aria-pressed="false">Same cases across all models</button><button id="scope-case" aria-pressed="false">Selected scenario</button></div>
 <div class="scroll"><table class="metrics" id="metrics"></table></div><p class="note" id="metric-note"></p></section>
@@ -236,4 +244,13 @@ if(data.shareable)byId('privacy-note').textContent='Shareable metrics report · 
 byId('stamp').textContent=(data.synthetic?'SYNTHETIC OFFLINE RESULTS — not measured LLM performance. ':'')+'As of: '+data.generated_at+' · Unrun and blocked cases are shown explicitly.';
 byId('project').addEventListener('change',project);byId('case').addEventListener('change',scenario);byId('turn').addEventListener('change',drawConversations);
 for(const value of ['project','common','case'])byId('scope-'+value).addEventListener('click',()=>{scope=value;if(value!=='case')byId('case').value=ALL_CASES;scenario();});project();
+// Enhance only after the interactive tables have rendered successfully. A disabled,
+// stripped or failed script leaves the pre-rendered reading view fully accessible.
+if(data.shareable){
+ const reading=byId('static-report'),interactive=byId('interactive-report');
+ byId('show-reading-view').hidden=false;byId('return-interactive').hidden=false;
+ byId('show-reading-view').addEventListener('click',()=>{closeHelp();reading.hidden=false;interactive.hidden=true;window.scrollTo(0,0);});
+ byId('return-interactive').addEventListener('click',()=>{reading.hidden=true;interactive.hidden=false;window.scrollTo(0,0);});
+ interactive.hidden=false;reading.hidden=true;
+}
 </script></html>"""
