@@ -312,6 +312,18 @@ def main():
                   historical_count=len(historical),
                   baseline=baseline, profile_notes=profile_notes, synthetic=data["synthetic"],
                   generated_at=data["generated_at_utc"])
+
+    def check_shareable(content):
+        found = violations("docs/benchmark.html", content.encode(), terms, fragments, words)
+        if found:
+            raise ValueError("Shareable HTML publication guard rejected output: " + ", ".join(found))
+
+    render_review(comparisons, out / "Benchmark-shareable.html", project_rows=data["rows"],
+                  common_rows=common_rows, consolidated=data["consolidated"],
+                  followup_count=len(followups), model_profiles=data["model_profiles"],
+                  historical_count=len(historical), baseline=baseline,
+                  synthetic=data["synthetic"], generated_at=data["generated_at_utc"],
+                  shareable=True, publication_check=check_shareable)
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
     writer.writeheader()
