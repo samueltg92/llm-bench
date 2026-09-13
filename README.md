@@ -262,6 +262,9 @@ aceptada por la API, sin inferir que todos los nodos del origen fueron evaluados
 
 `Conversaciones.html`, en el directorio privado de revisión, compara todos los
 modelos simultáneamente, con métricas por proyecto y escenario y filtro por turno.
+La opción «Mismos casos en los 4» intersecta casos evaluables, conservando los fallos
+de calidad. En un escenario se muestran también latencias de llamadas aceptadas
+si la conversación quedó incompleta; el agregado del proyecto usa conversaciones completas.
 `--private-project-labels` acepta nombres privados por alias, usados exclusivamente
 en ese visor. Incluye los historiales originales y los
 resultados simulados de tools; nunca debe publicarse. Los cierres silenciosos y las

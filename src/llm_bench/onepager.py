@@ -13,6 +13,20 @@ def median(values):
     return statistics.median(values) if values else None
 
 
+def common_cohort(runs, model_keys):
+    """Intersect evaluable cases, retaining model failures rather than only passes."""
+    required = set(model_keys)
+    available = {}
+    for run in runs:
+        if run["status"] in {"error", "skipped_context", "context_failed", "quota_capacity"}:
+            continue
+        key = (run["project"], run["scenario_sha256"], run["source_sha256"], run["repetition"])
+        available.setdefault(key, set()).add(run["model_key"])
+    common = {key for key, models in available.items() if required <= models}
+    return [r for r in runs if r["model_key"] in required
+            and (r["project"], r["scenario_sha256"], r["source_sha256"], r["repetition"]) in common]
+
+
 def summarize(runs, calls, planned, model_names, *, known_costs, reserved, notes=None):
     """Keep failures in coverage/cost; latency uses complete conversations only.
 

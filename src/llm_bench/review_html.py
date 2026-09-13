@@ -5,10 +5,12 @@ import json
 from .privacy import write_private
 
 
-def render_review(records, path, *, project_rows=None, project_names=None, generated_at=""):
+def render_review(records, path, *, project_rows=None, common_rows=None,
+                  project_names=None, generated_at=""):
     # Model output is untrusted. Escape the data block and use textContent only.
     data = {"records": records, "project_rows": project_rows or [],
-            "project_names": project_names or {}, "generated_at": generated_at}
+            "common_rows": common_rows or [], "project_names": project_names or {},
+            "generated_at": generated_at}
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     write_private(path, TEMPLATE.replace("__RECORDS__", payload), plain=True)
 
@@ -44,7 +46,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px ui-monospace,monospace
 <p class="stamp" id="stamp"></p><p class="stamp">Archivo privado con nombres y contenido original. Funciona sin conexión; los resultados de tools son simulados.</p></header>
 <main><label>Proyecto<select id="project"></select></label><label>Escenario simulado<select id="case"></select></label>
 <section class="box"><div class="toolbar"><h2 id="metric-title">Métricas del proyecto</h2>
-<button id="scope-project" aria-pressed="true">Todo el proyecto</button><button id="scope-case" aria-pressed="false">Escenario seleccionado</button></div>
+<button id="scope-project" aria-pressed="true">Todo el proyecto</button><button id="scope-common" aria-pressed="false">Mismos casos en los 4</button><button id="scope-case" aria-pressed="false">Escenario seleccionado</button></div>
 <div class="scroll"><table class="metrics" id="metrics"></table></div><p class="note" id="metric-note"></p></section>
 <section><div class="toolbar"><h2>Conversaciones del escenario</h2><label>Mostrar<select id="turn"></select></label></div>
 <p id="description" class="description"></p><div class="scroll"><div class="panes" id="panes"></div></div></section></main>
@@ -63,9 +65,9 @@ const percent=(a,b)=>b?Math.round(100*a/b)+'% ('+a+'/'+b+')':'—';
 function selection(){return records.filter(r=>r.project===byId('project').value&&r.case===byId('case').value);}
 function drawMetrics(){
  const selected=selection();
- const rows=scope==='project'?data.project_rows.filter(r=>r.project===byId('project').value):selected.map(r=>({...r.metrics,model:r.model,state:r.status}));
+ const rows=scope==='case'?selected.map(r=>({...r.metrics,model:r.model,state:r.status})):(scope==='common'?data.common_rows:data.project_rows).filter(r=>r.project===byId('project').value);
  const fields=[
-  [scope==='project'?'Casos evaluables / planificados':'Estado del escenario',r=>scope==='project'?r.evaluable+' / '+r.planned:status(r.state)],
+  [scope==='case'?'Estado del escenario':scope==='common'?'Casos comunes evaluables':'Casos evaluables / planificados',r=>scope==='case'?status(r.state):r.evaluable+' / '+r.planned],
   ['Conversaciones completas',r=>percent(r.complete,r.evaluable)],
   ['Hitos del flujo en orden',r=>percent(r.paths_passed,r.paths_total)],
   ['Tools esperadas: nombre, argumentos y turno',r=>percent(r.tool_checks_passed,r.tool_checks_total)],
@@ -81,9 +83,9 @@ function drawMetrics(){
  ];
  const table=byId('metrics');table.replaceChildren();const head=node('thead',''),hr=node('tr','');hr.append(node('th','Métrica'));models.forEach(m=>hr.append(node('th',m)));head.append(hr);table.append(head);
  const body=node('tbody','');for(const [index,[label,format]] of fields.entries()){const tr=node('tr','');tr.append(node('td',label));for(const model of models){const r=rows.find(x=>x.model===model);tr.append(node('td',r&&(index===0||r.tested)?format(r):'—'));}body.append(tr);}table.append(body);
- byId('metric-title').textContent=scope==='project'?'Métricas de '+(data.project_names[byId('project').value]||byId('project').value):'Métricas del escenario '+byId('case').value;
- byId('metric-note').textContent='TTFT incluye el primer texto o delta de tool. Medianas de llamadas en conversaciones completas; las esperas por cuota se excluyen. Los hitos admiten pasos adicionales. Las reglas son comprobaciones explícitas, no una evaluación semántica exhaustiva. Sin señal de idioma no significa ausencia garantizada de fugas. Costos calculados, no facturas; un rechazo no se puntúa como fallo de calidad.';
- byId('scope-project').setAttribute('aria-pressed',scope==='project');byId('scope-case').setAttribute('aria-pressed',scope==='case');
+ byId('metric-title').textContent=scope==='case'?'Métricas del escenario '+byId('case').value:(scope==='common'?'Casos comunes · ':'Métricas de ')+(data.project_names[byId('project').value]||byId('project').value);
+ byId('metric-note').textContent=(scope==='common'?'Solo casos con observaciones evaluables en los cuatro modelos; se conservan los fallos de calidad. ':scope==='project'?'La cobertura puede diferir entre modelos. Usa «Mismos casos en los 4» para comparar una selección común. ':'')+'TTFT incluye el primer texto o delta de tool. '+(scope!=='case'?'Medianas de llamadas en conversaciones completas. ':'Medianas de llamadas aceptadas del escenario, también si la conversación quedó incompleta. ')+'Las esperas por cuota se excluyen. Los hitos admiten pasos adicionales. Las reglas son comprobaciones explícitas, no una evaluación semántica exhaustiva. Sin señal de idioma no significa ausencia garantizada de fugas. Costos calculados, no facturas; un rechazo no se puntúa como fallo de calidad.';
+ for(const value of ['project','common','case'])byId('scope-'+value).setAttribute('aria-pressed',scope===value);
 }
 function drawConversations(){
  const selected=selection(),panes=byId('panes');panes.replaceChildren();
@@ -113,5 +115,5 @@ function project(){const rows=records.filter(r=>r.project===byId('project').valu
 options('project',unique(records.map(r=>r.project)),v=>data.project_names[v]||v);
 byId('stamp').textContent='Corte: '+data.generated_at+' · Los casos sin ejecutar o bloqueados se muestran explícitamente.';
 byId('project').addEventListener('change',project);byId('case').addEventListener('change',scenario);byId('turn').addEventListener('change',drawConversations);
-for(const value of ['project','case'])byId('scope-'+value).addEventListener('click',()=>{scope=value;drawMetrics();});project();
+for(const value of ['project','common','case'])byId('scope-'+value).addEventListener('click',()=>{scope=value;drawMetrics();});project();
 </script></html>"""

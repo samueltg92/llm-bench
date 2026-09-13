@@ -1,4 +1,4 @@
-from llm_bench.onepager import summarize
+from llm_bench.onepager import common_cohort, summarize
 
 
 def test_summary_keeps_failed_coverage_but_excludes_failed_latency():
@@ -43,3 +43,14 @@ def test_forbidden_call_failure_is_visible_in_rule_compliance():
                     known_costs={}, reserved={})["rows"][0]
     assert (row["tool_checks_passed"], row["tool_checks_total"]) == (1, 1)
     assert (row["rules_passed"], row["rules_total"]) == (0, 1)
+
+
+def test_common_cases_keep_quality_failures_but_require_all_providers():
+    base = {"project": "project_1", "source_sha256": "source", "repetition": 1}
+    runs = [{**base, "scenario_sha256": case, "model_key": model, "status": state}
+            for case, model, state in [("one", "a", "ok"), ("one", "b", "empty_response"),
+                                       ("two", "a", "ok"), ("two", "b", "error"),
+                                       ("three", "a", "ok")]]
+    cohort = common_cohort(runs, ["a", "b"])
+    assert len(cohort) == 2
+    assert {r["status"] for r in cohort} == {"ok", "empty_response"}

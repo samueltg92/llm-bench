@@ -7,6 +7,7 @@ Each provider remains serial and retains its rolling request pacer across cases.
 import argparse
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -62,6 +63,13 @@ def main():
                             repetition)
                 if identity in done:
                     continue
+                # Each case creates a new provider; preserve its configured minimum
+                # spacing across that boundary as well as within conversations.
+                pause = max(0, float(bench.get("min_request_interval_s", 0))) if outcomes else 0
+                while pause:
+                    step = min(pause, 30)
+                    time.sleep(step)
+                    pause -= step
                 preview = plan([(bundle, scenario)], {key: model}, prices, bench, ["active_node"])
                 allocation = amount(preview[0]["budget_reserve_usd"])
                 try:

@@ -17,7 +17,7 @@ from llm_bench import config
 from llm_bench.adjudication import silent_close
 from llm_bench.experiment import inputs
 from llm_bench.language_review import review_signals
-from llm_bench.onepager import render, summarize
+from llm_bench.onepager import common_cohort, median, render, summarize
 from llm_bench.privacy import external_path, fingerprint, write_private
 from llm_bench.report import conversation_review, read_lines
 from llm_bench.review_html import render_review
@@ -109,11 +109,17 @@ def main():
                                         default=0))
         return row
 
-    for row in data["rows"]:
-        selected = [r for r in runs if names[r["model_key"]] == row["model"]
-                    and "Proyecto " + r["project"].split("_")[-1] == row["project"]]
-        ids = {r["run_id"] for r in selected}
-        review_metrics(row, selected, [c for c in calls if c.get("run_id") in ids])
+    common = common_cohort(runs, names)
+    common_counts = {p: sum(r["project"] == p for r in common) // len(names) for p in planned}
+    common_rows = summarize(common, calls, common_counts, names,
+                            known_costs={}, reserved={})["rows"]
+    data["common_case_rows"] = common_rows
+    for rows, population in [(data["rows"], runs), (common_rows, common)]:
+        for row in rows:
+            selected = [r for r in population if names[r["model_key"]] == row["model"]
+                        and "Proyecto " + r["project"].split("_")[-1] == row["project"]]
+            ids = {r["run_id"] for r in selected}
+            review_metrics(row, selected, [c for c in calls if c.get("run_id") in ids])
     data["language_review"] = dict(Counter(r["decision"] for r in language_reviews))
     language_note = (
         f"Idioma: {data['language_review'].get('confirmed_foreign', 0)} señales confirmadas, "
@@ -172,6 +178,12 @@ def main():
                 case_metrics = summarize([run] if run else [], selected_calls,
                                          {bundle.project: 1}, {model: name},
                                          known_costs={}, reserved={})["rows"][0]
+                accepted = [c for c in selected_calls if c.get("usage_source") == "provider"
+                            and c.get("status") in {"ok", "empty_response", "output_limit"}]
+                for field, source in [("ttft_s", "ttft_ms"), ("first_text_s", "first_text_ms"),
+                                      ("latency_s", "total_latency_ms")]:
+                    case_metrics[field] = median(c[source] / 1000 for c in accepted
+                                                 if c.get(source) is not None)
                 review_metrics(case_metrics, [run] if run else [], selected_calls)
                 comparisons.append({**row, "case": alias + f" · R{row['repetition']}",
                                     "description": scenario.description,
@@ -186,7 +198,8 @@ def main():
         private_names = {"Proyecto " + k.split("_")[-1]: v for k, v in labels.items()
                          if k in {b.project for b, _ in pairs} and isinstance(v, str)}
     render_review(comparisons, review / "Conversaciones.html", project_rows=data["rows"],
-                  project_names=private_names, generated_at=data["generated_at_utc"])
+                  common_rows=common_rows, project_names=private_names,
+                  generated_at=data["generated_at_utc"])
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
     writer.writeheader()
