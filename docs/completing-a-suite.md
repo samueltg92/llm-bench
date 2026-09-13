@@ -113,3 +113,12 @@ runner, storage and retry-free transport code. The full cost bound is retained f
 every recorded call plus one possible unrecorded in-flight request. The original
 manifest remains incomplete, evidence is hashed, and the ledger update is locked
 and idempotent. Parallel, unverified or changed evidence cannot use this path.
+
+Completed executions already authenticated by `reconcile_usage` may undergo an
+explicit `reconcile_finished_output` review. It releases unused output allowance
+only when complete provider counts and unchanged evidence are available. It retains
+uncached input plus completion **and** reasoning tokens, deliberately counting
+reasoning twice when it is already included. Failed attempts, missing usage,
+interrupted executions and unaudited historical margins keep their prior reserves.
+The separate audit is locked and idempotent; it never changes spending limits or
+claims to settle a provider invoice.
