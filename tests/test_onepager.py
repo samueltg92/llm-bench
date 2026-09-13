@@ -18,6 +18,7 @@ def test_summary_keeps_failed_coverage_but_excludes_failed_latency():
     assert (row["tested"], row["complete"], row["planned"]) == (2, 1, 3)
     assert row["ttft_s"] == 1
     assert row["tool_checks_total"] == 2  # No inflation from forbidden-call assertions.
+    assert row["rules_total"] == 4  # Absence constraints remain part of the rule score.
     assert row["cost_usd"] == .2
     assert "lookup" not in str(data)
     assert "scenario" not in str(data)
@@ -32,3 +33,13 @@ def test_provider_rejection_is_not_scored_as_model_quality():
     row = data["rows"][0]
     assert row["tested"] == 1 and row["evaluable"] == 0
     assert row["tool_checks_total"] == row["paths_total"] == 0
+
+
+def test_forbidden_call_failure_is_visible_in_rule_compliance():
+    run = {"project": "project_1", "model_key": "a", "run_id": "x", "status": "ok",
+           "assertions": [{"id": "expected_tool:read", "pass": True, "kind": "tool_expectation"},
+                          {"id": "forbidden_tool:write", "pass": False, "kind": "tool_expectation"}]}
+    row = summarize([run], [], {"project_1": 1}, {"a": "Model A"},
+                    known_costs={}, reserved={})["rows"][0]
+    assert (row["tool_checks_passed"], row["tool_checks_total"]) == (1, 1)
+    assert (row["rules_passed"], row["rules_total"]) == (0, 1)

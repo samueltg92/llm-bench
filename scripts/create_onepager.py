@@ -32,6 +32,8 @@ def main():
     parser.add_argument("--exclude-runs-file", type=Path)
     parser.add_argument("--adjudication-policy", type=Path)
     parser.add_argument("--language-policy", type=Path)
+    parser.add_argument("--private-project-labels", type=Path,
+                        help="Private display names used only in the offline conversation viewer")
     parser.add_argument("--note", action="append", default=[])
     args = parser.parse_args()
     load_dotenv(external_path(args.env_file), override=True)
@@ -95,6 +97,23 @@ def main():
     data["calls_without_measured_cost"] = unknown
     data["generated_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     data["adjudicated_silent_closes"] = len(adjudications)
+    def review_metrics(row, selected_runs, selected_calls):
+        ids = {r["run_id"] for r in selected_runs}
+        decisions = Counter(r["decision"] for r in language_reviews if r["run_id"] in ids)
+        row.update(language_confirmed=decisions["confirmed_foreign"],
+                   language_pending=decisions["pending"],
+                   language_false_positive=decisions["false_positive_spanish"],
+                   max_input_tokens=max((c.get("prompt_tokens") or 0 for c in selected_calls
+                                         if c.get("usage_source") == "provider"
+                                         and c.get("status") in {"ok", "empty_response", "output_limit"}),
+                                        default=0))
+        return row
+
+    for row in data["rows"]:
+        selected = [r for r in runs if names[r["model_key"]] == row["model"]
+                    and "Proyecto " + r["project"].split("_")[-1] == row["project"]]
+        ids = {r["run_id"] for r in selected}
+        review_metrics(row, selected, [c for c in calls if c.get("run_id") in ids])
     data["language_review"] = dict(Counter(r["decision"] for r in language_reviews))
     language_note = (
         f"Idioma: {data['language_review'].get('confirmed_foreign', 0)} señales confirmadas, "
@@ -149,11 +168,25 @@ def main():
                        "path_match": run.get("expected_path_match") if run else None}
                 coverage.append(row)
                 original = originals[run["run_id"]] if run else {}
+                selected_calls = [c for c in calls if run and c.get("run_id") == run["run_id"]]
+                case_metrics = summarize([run] if run else [], selected_calls,
+                                         {bundle.project: 1}, {model: name},
+                                         known_costs={}, reserved={})["rows"][0]
+                review_metrics(case_metrics, [run] if run else [], selected_calls)
                 comparisons.append({**row, "case": alias + f" · R{row['repetition']}",
+                                    "description": scenario.description,
+                                    "scenario_name": scenario.id.removeprefix(bundle.project + "_").replace("_", " "),
+                                    "metrics": case_metrics,
                                     "history": original.get("history", []),
                                     "raw_status": original.get("summary", {}).get("status", "not_run"),
                                     "adjudicated": bool(run and run["run_id"] in adjudicated_ids)})
-    render_review(comparisons, review / "Conversaciones.html")
+    private_names = {}
+    if args.private_project_labels:
+        labels = json.loads(external_path(args.private_project_labels).read_text())
+        private_names = {"Proyecto " + k.split("_")[-1]: v for k, v in labels.items()
+                         if k in {b.project for b, _ in pairs} and isinstance(v, str)}
+    render_review(comparisons, review / "Conversaciones.html", project_rows=data["rows"],
+                  project_names=private_names, generated_at=data["generated_at_utc"])
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
     writer.writeheader()

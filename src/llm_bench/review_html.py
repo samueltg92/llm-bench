@@ -1,68 +1,117 @@
-"""Offline private comparison of the exact conversation histories."""
+"""Offline private comparison of all models, metrics and exact histories."""
 
 import json
 
 from .privacy import write_private
 
 
-def render_review(records, path):
+def render_review(records, path, *, project_rows=None, project_names=None, generated_at=""):
     # Model output is untrusted. Escape the data block and use textContent only.
-    payload = json.dumps(records, ensure_ascii=False).replace("<", "\\u003c")
-    document = TEMPLATE.replace("__RECORDS__", payload)
-    write_private(path, document, plain=True)
+    data = {"records": records, "project_rows": project_rows or [],
+            "project_names": project_names or {}, "generated_at": generated_at}
+    payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
+    write_private(path, TEMPLATE.replace("__RECORDS__", payload), plain=True)
 
 
 TEMPLATE = """<!doctype html>
 <html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Revisión privada de conversaciones</title>
+<title>Benchmark privado por proyecto</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f2f5f8;color:#142b42;font:15px system-ui,sans-serif}
-header{padding:25px 4vw;background:#142b42;color:white}h1{font-size:25px;margin:0 0 8px}
-header p{margin:4px 0;color:#d9e4ec}main{padding:20px 4vw}label{display:inline-grid;gap:6px;margin:0 18px 12px 0}
-select{font:inherit;padding:9px;border:1px solid #cad5df;border-radius:6px;background:white;max-width:100%}
-.panes{display:grid;grid-template-columns:1fr 1fr;gap:20px}.pane{min-width:0;background:white;border-radius:10px;padding:18px}
-h2{font-size:18px;margin:0 0 10px}.meta{color:#536575;font-size:13px;padding-bottom:14px;border-bottom:1px solid #dde5ed}
-.message{margin:16px 0;padding:12px;border-radius:7px;background:#f2f5f8;overflow-wrap:anywhere}
-.assistant{background:#eaf7f5}.role{font-size:12px;font-weight:700;color:#087f8c;margin-bottom:6px}
+*{box-sizing:border-box}body{margin:0;background:#f2f5f8;color:#142b42;font:14px system-ui,sans-serif}
+header{padding:24px 3vw;background:#142b42;color:white}h1{font-size:26px;margin:0 0 8px}
+header p{margin:5px 0;color:#d9e4ec}.stamp{font-size:12px;color:#9adde0}main{padding:20px 3vw}
+label{display:inline-grid;gap:6px;margin:0 20px 12px 0;font-weight:600}
+select,button{font:inherit;padding:9px;border:1px solid #cad5df;border-radius:6px;background:white;max-width:100%;color:#142b42}
+button{cursor:pointer}button[aria-pressed=true]{background:#087f8c;color:white;border-color:#087f8c}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.toolbar h2{margin-right:auto}
+h2{font-size:19px;margin:0 0 10px}h3{font-size:16px;margin:0 0 10px}.box{background:white;border-radius:10px;padding:18px;margin-bottom:20px}
+.scroll{overflow:auto}.metrics{border-collapse:collapse;width:100%;min-width:850px;table-layout:fixed}
+.metrics th,.metrics td{padding:9px 12px;text-align:right;border-bottom:1px solid #e3eaf0;vertical-align:top}
+.metrics th:first-child,.metrics td:first-child{text-align:left;width:24%}.metrics thead{background:#142b42;color:white}
+.metrics tbody tr:nth-child(even){background:#f2f6f9}.metrics td{font-variant-numeric:tabular-nums}
+.note,.meta{color:#536575;font-size:12px;line-height:1.5}.note{margin:10px 0 0}.description{font-size:14px;line-height:1.5;margin:4px 0 14px}
+.panes{display:grid;grid-template-columns:repeat(4,minmax(260px,1fr));gap:14px;min-width:1100px}
+.pane{min-width:0;background:white;border-radius:10px;padding:15px}.pane h3{color:#087f8c;position:sticky;top:0;background:white;padding:4px 0;z-index:1}
+.meta{padding-bottom:12px;border-bottom:1px solid #dde5ed}.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin:12px 0}
+.mini div{padding:8px 5px;background:#f2f6f9;border-radius:5px;font-size:11px}.mini b{display:block;font-size:13px;margin-bottom:3px}
+.message{margin:12px 0;padding:10px;border-radius:7px;background:#f2f5f8;overflow-wrap:anywhere}
+.assistant{background:#eaf7f5}.role{font-size:10px;font-weight:700;color:#087f8c;margin-bottom:6px}
 .content{white-space:pre-wrap;line-height:1.5}details{margin-top:8px}summary{cursor:pointer}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px ui-monospace,monospace}.empty{color:#657889;font-style:italic}
-@media(max-width:850px){.panes{grid-template-columns:1fr}}@media print{header,main{padding:12px}.panes{display:block}.pane{break-before:page}}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px ui-monospace,monospace}.empty{color:#657889;font-style:italic}
+@media print{header,main{padding:12px}.scroll{overflow:visible}.panes{min-width:0;grid-template-columns:repeat(2,1fr)}.metrics{min-width:0;font-size:10px}}
 </style>
-<header><h1>Revisión privada de conversaciones</h1>
-<p>Preguntas, respuestas y function calls originales. Este archivo contiene contenido confidencial: no pertenece al repositorio público.</p>
-<p>Funciona sin conexión. Los resultados de herramientas son simulados; no son consultas a servicios reales.</p></header>
-<main><label>Proyecto<select id="project"></select></label><label>Caso<select id="case"></select></label>
-<div class="panes"><section class="pane"><label>Modelo izquierdo<select id="left"></select></label><div id="a"></div></section>
-<section class="pane"><label>Modelo derecho<select id="right"></select></label><div id="b"></div></section></div></main>
+<header><h1>Benchmark por proyecto</h1><p>Los cuatro LLM: métricas, escenarios y conversaciones en una misma comparación.</p>
+<p class="stamp" id="stamp"></p><p class="stamp">Archivo privado con nombres y contenido original. Funciona sin conexión; los resultados de tools son simulados.</p></header>
+<main><label>Proyecto<select id="project"></select></label><label>Escenario simulado<select id="case"></select></label>
+<section class="box"><div class="toolbar"><h2 id="metric-title">Métricas del proyecto</h2>
+<button id="scope-project" aria-pressed="true">Todo el proyecto</button><button id="scope-case" aria-pressed="false">Escenario seleccionado</button></div>
+<div class="scroll"><table class="metrics" id="metrics"></table></div><p class="note" id="metric-note"></p></section>
+<section><div class="toolbar"><h2>Conversaciones del escenario</h2><label>Mostrar<select id="turn"></select></label></div>
+<p id="description" class="description"></p><div class="scroll"><div class="panes" id="panes"></div></div></section></main>
 <script type="application/json" id="records">__RECORDS__</script>
 <script>
-const records=JSON.parse(document.getElementById('records').textContent);
-const byId=id=>document.getElementById(id);
+const data=JSON.parse(document.getElementById('records').textContent),records=data.records;
+const byId=id=>document.getElementById(id),unique=xs=>[...new Set(xs)];
+const models=unique(records.map(r=>r.model));let scope='project';
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;}
-function options(id,values){byId(id).replaceChildren(...values.map(v=>{const o=node('option',v);o.value=v;return o;}));}
-const unique=xs=>[...new Set(xs)];
-const status=s=>({ok:'completa',not_run:'sin ejecutar',error:'error de ejecución',quota_capacity:'bloqueada por cuota',empty_response:'respuesta vacía',output_limit:'salida truncada',tool_iteration_limit:'límite de iteraciones de tools',call_limit:'límite de llamadas',skipped_context:'no cabe en contexto',context_failed:'no cabe en contexto'})[s]||s;
-options('project',unique(records.map(r=>r.project)));options('left',unique(records.map(r=>r.model)));
-options('right',unique(records.map(r=>r.model)));if(byId('right').options.length>1)byId('right').selectedIndex=1;
-function cases(){options('case',unique(records.filter(r=>r.project===byId('project').value).map(r=>r.case)));draw();}
-function pane(target,model){
- const root=byId(target);root.replaceChildren();
- const r=records.find(r=>r.project===byId('project').value&&r.case===byId('case').value&&r.model===model);
- if(!r){root.append(node('p','No hay una observación de este modelo para el caso seleccionado.','empty'));return;}
- root.append(node('h2',r.case));
- root.append(node('p','Estado registrado: '+status(r.raw_status)+' · Estado revisado: '+status(r.status)+' · Ruta esperada: '+(r.path_match===null?'no aplica':r.path_match?'sí':'no'),'meta'));
- if(!r.history.length)root.append(node('p','No hay mensajes registrados para esta combinación.','empty'));
- if(r.adjudicated)root.append(node('p','Se reconoció un cierre silencioso permitido por el prompt. El historial siguiente permanece intacto.','meta'));
- for(const m of r.history){
-  if(m.role==='system')continue;
-  const item=node('div','','message '+m.role);
-  item.append(node('div',({user:'USUARIO SIMULADO',assistant:'MODELO',tool:'RESULTADO SIMULADO DE TOOL'})[m.role]||m.role,'role'));
-  if(m.content)item.append(node('div',typeof m.content==='string'?m.content:JSON.stringify(m.content,null,2),'content'));
-  else if(!m.tool_calls?.length)item.append(node('div','Sin texto visible.','empty'));
-  if(m.tool_calls?.length){const d=node('details','');d.append(node('summary','Function calls ('+m.tool_calls.length+')'));d.append(node('pre',JSON.stringify(m.tool_calls,null,2)));item.append(d);}
-  root.append(item);
+function options(id,values,label=v=>v){byId(id).replaceChildren(...values.map(v=>{const o=node('option',label(v));o.value=v;return o;}));}
+const status=s=>({ok:'completa',not_run:'sin ejecutar',error:'error de ejecución',quota_capacity:'bloqueada por cuota',empty_response:'respuesta vacía',output_limit:'salida truncada',tool_iteration_limit:'límite de iteraciones de tools',call_limit:'límite de llamadas',skipped_context:'no cabe en contexto',context_failed:'no cabe en contexto'})[s]||s||'sin ejecutar';
+const number=n=>n===null||n===undefined?'—':Number(n).toLocaleString('es-CO');
+const seconds=n=>n===null||n===undefined?'—':Number(n).toFixed(2)+' s';
+const usd=n=>n===null||n===undefined?'—':'USD '+Number(n).toFixed(4);
+const percent=(a,b)=>b?Math.round(100*a/b)+'% ('+a+'/'+b+')':'—';
+function selection(){return records.filter(r=>r.project===byId('project').value&&r.case===byId('case').value);}
+function drawMetrics(){
+ const selected=selection();
+ const rows=scope==='project'?data.project_rows.filter(r=>r.project===byId('project').value):selected.map(r=>({...r.metrics,model:r.model,state:r.status}));
+ const fields=[
+  [scope==='project'?'Casos evaluables / planificados':'Estado del escenario',r=>scope==='project'?r.evaluable+' / '+r.planned:status(r.state)],
+  ['Conversaciones completas',r=>percent(r.complete,r.evaluable)],
+  ['Hitos del flujo en orden',r=>percent(r.paths_passed,r.paths_total)],
+  ['Tools esperadas: nombre, argumentos y turno',r=>percent(r.tool_checks_passed,r.tool_checks_total)],
+  ['Reglas explícitas del caso',r=>percent(r.rules_passed,r.rules_total)],
+  ['TTFT · mediana por llamada',r=>seconds(r.ttft_s)],
+  ['Primer texto visible · mediana',r=>seconds(r.first_text_s)],
+  ['Latencia completa · mediana por llamada',r=>seconds(r.latency_s)],
+  ['Function calls nativos / inválidos',r=>number(r.native_calls)+' / '+number(r.invalid_calls)],
+  ['Idioma: señales confirmadas / por revisar',r=>number(r.language_confirmed)+' / '+number(r.language_pending)],
+  ['Mayor entrada aceptada · tokens',r=>number(r.max_input_tokens)],
+  ['Costo calculado conocido',r=>r.tested?usd(r.cost_usd):'—'],
+  ['Rechazos de proveedor o contexto',r=>number(r.infrastructure_errors)]
+ ];
+ const table=byId('metrics');table.replaceChildren();const head=node('thead',''),hr=node('tr','');hr.append(node('th','Métrica'));models.forEach(m=>hr.append(node('th',m)));head.append(hr);table.append(head);
+ const body=node('tbody','');for(const [index,[label,format]] of fields.entries()){const tr=node('tr','');tr.append(node('td',label));for(const model of models){const r=rows.find(x=>x.model===model);tr.append(node('td',r&&(index===0||r.tested)?format(r):'—'));}body.append(tr);}table.append(body);
+ byId('metric-title').textContent=scope==='project'?'Métricas de '+(data.project_names[byId('project').value]||byId('project').value):'Métricas del escenario '+byId('case').value;
+ byId('metric-note').textContent='TTFT incluye el primer texto o delta de tool. Medianas de llamadas en conversaciones completas; las esperas por cuota se excluyen. Los hitos admiten pasos adicionales. Las reglas son comprobaciones explícitas, no una evaluación semántica exhaustiva. Sin señal de idioma no significa ausencia garantizada de fugas. Costos calculados, no facturas; un rechazo no se puntúa como fallo de calidad.';
+ byId('scope-project').setAttribute('aria-pressed',scope==='project');byId('scope-case').setAttribute('aria-pressed',scope==='case');
+}
+function drawConversations(){
+ const selected=selection(),panes=byId('panes');panes.replaceChildren();
+ for(const model of models){
+  const r=selected.find(x=>x.model===model),root=node('article','','pane');root.append(node('h3',model));panes.append(root);
+  if(!r){root.append(node('p','No hay observación para este caso.','empty'));continue;}
+  root.append(node('p','Registrado: '+status(r.raw_status)+' · Revisado: '+status(r.status),'meta'));
+  const mini=node('div','','mini');for(const [label,value] of [['TTFT',seconds(r.metrics?.ttft_s)],['Latencia',seconds(r.metrics?.latency_s)],['Costo',r.metrics?.tested?usd(r.metrics.cost_usd):'—']]){const box=node('div','');box.append(node('b',value),node('span',label));mini.append(box);}root.append(mini);
+  if(r.adjudicated)root.append(node('p','Cierre silencioso permitido por el prompt. Historial original conservado.','meta'));
+  if(!r.history.length)root.append(node('p','No hay mensajes registrados para esta combinación.','empty'));
+  let turn=-1,visible=0;
+  for(const m of r.history){
+   if(m.role==='system')continue;if(m.role==='user')turn++;
+   if(byId('turn').value!=='all'&&String(turn)!==byId('turn').value)continue;
+   visible++;const item=node('div','','message '+m.role);
+   item.append(node('div',(({user:'USUARIO SIMULADO',assistant:'MODELO',tool:'RESULTADO SIMULADO DE TOOL'})[m.role]||m.role)+(turn>=0?' · TURNO '+(turn+1):' · INICIO'),'role'));
+   if(m.content)item.append(node('div',typeof m.content==='string'?m.content:JSON.stringify(m.content,null,2),'content'));
+   else if(!m.tool_calls?.length)item.append(node('div','Sin texto visible.','empty'));
+   if(m.tool_calls?.length){const d=node('details','');d.append(node('summary','Function calls ('+m.tool_calls.length+')'));d.append(node('pre',JSON.stringify(m.tool_calls,null,2)));item.append(d);}root.append(item);
+  }
+  if(r.history.length&&!visible)root.append(node('p','Este modelo no registró el turno seleccionado.','empty'));
  }
 }
-function draw(){pane('a',byId('left').value);pane('b',byId('right').value);}
-byId('project').addEventListener('change',cases);for(const id of ['case','left','right'])byId(id).addEventListener('change',draw);cases();
+function draw(){drawMetrics();drawConversations();}
+function scenario(){const rows=selection(),n=Math.max(0,...rows.map(r=>r.history.filter(m=>m.role==='user').length));options('turn',['all',...Array.from({length:n},(_,i)=>String(i))],v=>v==='all'?'Todos los turnos':'Turno '+(Number(v)+1));byId('description').textContent=rows[0]?.description||'';draw();}
+function project(){const rows=records.filter(r=>r.project===byId('project').value);options('case',unique(rows.map(r=>r.case)),v=>v+(rows.find(r=>r.case===v)?.scenario_name?' · '+rows.find(r=>r.case===v).scenario_name:''));scenario();}
+options('project',unique(records.map(r=>r.project)),v=>data.project_names[v]||v);
+byId('stamp').textContent='Corte: '+data.generated_at+' · Los casos sin ejecutar o bloqueados se muestran explícitamente.';
+byId('project').addEventListener('change',project);byId('case').addEventListener('change',scenario);byId('turn').addEventListener('change',drawConversations);
+for(const value of ['project','case'])byId('scope-'+value).addEventListener('click',()=>{scope=value;drawMetrics();});project();
 </script></html>"""

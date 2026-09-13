@@ -260,7 +260,9 @@ o contexto no se incluyen en porcentajes de calidad. Los CSV detallan resultados
 y disposición de cada caso. La cobertura de nodos cuenta prompts con respuesta
 aceptada por la API, sin inferir que todos los nodos del origen fueron evaluados.
 
-`Conversaciones.html`, en el directorio privado de revisión, permite comparar dos
-modelos para el mismo caso sin conexión. Incluye los historiales originales y los
+`Conversaciones.html`, en el directorio privado de revisión, compara todos los
+modelos simultáneamente, con métricas por proyecto y escenario y filtro por turno.
+`--private-project-labels` acepta nombres privados por alias, usados exclusivamente
+en ese visor. Incluye los historiales originales y los
 resultados simulados de tools; nunca debe publicarse. Los cierres silenciosos y las
 señales de idioma revisadas se documentan por separado, sin editar los registros.

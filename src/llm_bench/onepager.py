@@ -35,7 +35,9 @@ def summarize(runs, calls, planned, model_names, *, known_costs, reserved, notes
             positive_tools = [a for a in assertions if a["id"].startswith(
                 ("expected_tool:", "unreached_tool:")
             )]
-            rules = [a for a in assertions if a.get("kind") != "tool_expectation"]
+            rules = [a for a in assertions if not a["id"].startswith(
+                ("expected_tool:", "unreached_tool:")
+            )]
             route_runs = [r for r in evaluable if r.get("expected_path_match") is not None]
             rows.append({
                 "project": "Proyecto " + project.split("_")[-1], "model": name,
@@ -155,7 +157,7 @@ def render(data, out: Path):
     table.drawOn(c, margin, y - th)
     y -= th + 8
     y = paragraph(
-        "Termina = conversación completa; Ruta = recorrido esperado (— si no aplica). "
+        "Termina = conversación completa; Ruta = hitos esperados en orden, admite pasos adicionales. "
         "* Hay rechazos de proveedor/contexto excluidos de los porcentajes de calidad. "
         "(1) Llamados esperados: nombre, argumentos y turno; no basta anunciarlos. "
         "(2) Comprobaciones explícitas del caso; no cubren todas las reglas del prompt. "
