@@ -26,7 +26,7 @@ def main():
     roots = [external_path(Path(values[i + 1])) for i, value in enumerate(values)
              if value == "--run-root"]
     policy_files = [external_path(Path(values[i + 1])) for i, value in enumerate(values)
-                    if value in {"--adjudication-policy", "--language-policy"}]
+                    if value in {"--adjudication-policy", "--language-policy", "--followup-plan", "--historical-runs-file"}]
     deadline = time.monotonic() + args.max_hours * 3600
     last_signature = None
     state = {"status": "watching", "refreshes": 0, "generation_errors": 0}

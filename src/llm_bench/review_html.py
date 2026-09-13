@@ -6,11 +6,14 @@ from .privacy import write_private
 
 
 def render_review(records, path, *, project_rows=None, common_rows=None,
-                  project_names=None, generated_at=""):
+                  project_names=None, consolidated=None, followup_count=0, model_profiles=None,
+                  historical_count=0, generated_at=""):
     # Model output is untrusted. Escape the data block and use textContent only.
     data = {"records": records, "project_rows": project_rows or [],
             "common_rows": common_rows or [], "project_names": project_names or {},
-            "generated_at": generated_at}
+            "generated_at": generated_at, "consolidated": consolidated or [],
+            "followup_count": followup_count, "model_profiles": model_profiles or {},
+            "historical_count": historical_count}
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     write_private(path, TEMPLATE.replace("__RECORDS__", payload), plain=True)
 
@@ -48,6 +51,17 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px ui-monospace,monospace
 <section class="box"><div class="toolbar"><h2 id="metric-title">Project metrics</h2>
 <button id="scope-project" aria-pressed="true">Entire project</button><button id="scope-common" aria-pressed="false">Same cases across all 4</button><button id="scope-case" aria-pressed="false">Selected scenario</button></div>
 <div class="scroll"><table class="metrics" id="metrics"></table></div><p class="note" id="metric-note"></p></section>
+<section class="box"><h2>Model summary — mean, minimum and maximum</h2>
+<label>Summary scope<select id="summary-project"></select></label><label>Case selection<select id="summary-cohort"></select></label>
+<div class="scroll"><table class="metrics" id="summary-metrics"></table></div>
+<p class="note">Each cell shows mean, min–max and sample count N. Means use individual samples, not project medians. Percentage checks are binary (0 = fail, 100 = pass). Timing uses complete conversations; input and costs also include recorded calls from incomplete conversations. Coverage differs by model; use the common-case selection for matched coverage. The original project table above retains its median timings.</p></section>
+<section class="box"><details><summary><b>Metric definitions, cost scope and reasoning settings</b></summary>
+<p class="description"><b>TTFT:</b> time from an API request to the first text or tool delta; internal reasoning is not user-facing text. <b>Full latency:</b> time to the end of that API response. <b>First user-facing text:</b> time from a simulated user turn to its first spoken response, including any preceding LLM/tool steps. <b>Flow latency:</b> the full simulated turn across its LLM calls and mock tool results. Local quota waits are excluded and reported separately in the summary.</p>
+<p class="description"><b>Expected tools:</b> passed positive function-call expectations divided by all positive expectations, including those on unreached turns. A native call must have the expected name, valid arguments matching the specified subset and the required count in the specified turn. Merely announcing a call does not pass. Backend execution is mocked.</p>
+<p class="description"><b>Explicit case rules:</b> passed programmed assertions divided by all applicable assertions: required/prohibited text patterns, word limits, expected active node, forbidden tools, per-turn tool limits and specified tool-before-text order. This is not an exhaustive semantic assessment of every prompt instruction. <b>Ordered flow milestones:</b> fraction of applicable conversations whose actual node path contains the expected milestones in order; extra steps are allowed and repeated milestones remain significant.</p>
+<p class="description"><b>Total known cost:</b> sum of known call costs for the selected project or scenario and model. This is not a per-call price. The summary separates cost per API call and per conversation. Cumulative costs in the PDF also include earlier attempts and diagnostics. Unknown usage is not assumed free; calculated costs are not invoices.</p>
+<p class="description"><b>Reasoning profiles:</b> <span id="profile-description"></span> GLM 5.3 Flash requires thinking; low reduces effort but does not disable it. Gemma 4 minimal disables thinking. Different profiles and cache behavior can affect latency and quality. Profiles are read from recorded experiment settings.</p>
+<p class="note" id="followup-note"></p></details></section>
 <section><div class="toolbar"><h2>Scenario conversations</h2><label>Show<select id="turn"></select></label></div>
 <p id="description" class="description"></p><div class="scroll"><div class="panes" id="panes"></div></div></section></main>
 <script type="application/json" id="records">__RECORDS__</script>
@@ -79,7 +93,7 @@ function drawMetrics(){
   ['Native / invalid function calls',r=>number(r.native_calls)+' / '+number(r.invalid_calls)],
   ['Language flags: confirmed / pending',r=>number(r.language_confirmed)+' / '+number(r.language_pending)],
   ['Largest accepted input · tokens',r=>number(r.max_input_tokens)],
-  ['Known calculated cost',r=>r.tested?usd(r.cost_usd):'—'],
+  ['Total known cost · selected scope',r=>r.tested?usd(r.cost_usd):'—'],
   ['Provider or context rejections',r=>number(r.infrastructure_errors)]
  ];
  const table=byId('metrics');table.replaceChildren();const head=node('thead',''),hr=node('tr','');hr.append(node('th','Metric'));models.forEach(m=>hr.append(node('th',m)));head.append(hr);table.append(head);
@@ -92,8 +106,10 @@ function drawConversations(){
  const selected=selection(),panes=byId('panes');panes.replaceChildren();
  for(const model of models){
   const r=selected.find(x=>x.model===model),root=node('article','','pane');root.append(node('h3',model));panes.append(root);
+  if(data.model_profiles[model])root.append(node('p',data.model_profiles[model],'meta'));
   if(!r){root.append(node('p','No observation for this case.','empty'));continue;}
   root.append(node('p','Recorded: '+status(r.raw_status)+' · Reviewed: '+status(r.status),'meta'));
+  if(r.attempt==='Follow-up')root.append(node('p','Follow-up attempt · Original outcome: '+status(r.original_status)+'. Original evidence retained in the baseline report.','meta'));
   const mini=node('div','','mini');for(const [label,value] of [['TTFT',seconds(r.metrics?.ttft_s)],['Latency',seconds(r.metrics?.latency_s)],['Cost',r.metrics?.tested?usd(r.metrics.cost_usd):'—']]){const box=node('div','');box.append(node('b',value),node('span',label));mini.append(box);}root.append(mini);
   if(r.adjudicated)root.append(node('p','Silent closing allowed by the prompt. Original history preserved.','meta'));
   if(!r.history.length)root.append(node('p','No messages recorded for this combination.','empty'));
@@ -111,9 +127,23 @@ function drawConversations(){
  }
 }
 function draw(){drawMetrics();drawConversations();}
+function drawSummary(){
+ const rows=data.consolidated.filter(r=>r.project===byId('summary-project').value&&r.cohort===byId('summary-cohort').value);
+ const table=byId('summary-metrics');table.replaceChildren();const head=node('thead',''),hr=node('tr','');hr.append(node('th','Metric / sample'));models.forEach(m=>hr.append(node('th',m)));head.append(hr);table.append(head);const body=node('tbody','');
+ for(const metric of unique(rows.map(r=>r.metric))){const sample=rows.find(r=>r.metric===metric),tr=node('tr',''),label=node('td',metric+' ('+sample.unit+')');label.append(node('div',sample.sample,'note'));tr.append(label);
+  for(const model of models){const r=rows.find(x=>x.metric===metric&&x.model===model),cell=node('td','');if(!r?.n)cell.textContent='—';else{const f=v=>Number(v).toLocaleString('en-US',{minimumFractionDigits:r.unit==='USD'?5:2,maximumFractionDigits:r.unit==='USD'?5:2});cell.append(node('b',f(r.mean)),node('div',f(r.min)+'–'+f(r.max),'note'),node('div','N = '+r.n,'note'));}tr.append(cell);}body.append(tr);
+ }table.append(body);
+}
 function scenario(){const rows=selection(),n=Math.max(0,...rows.map(r=>r.history.filter(m=>m.role==='user').length));options('turn',['all',...Array.from({length:n},(_,i)=>String(i))],v=>v==='all'?'All turns':'Turn '+(Number(v)+1));byId('description').textContent=rows[0]?.description||'';draw();}
 function project(){const rows=records.filter(r=>r.project===byId('project').value);options('case',unique(rows.map(r=>r.case)),v=>v+(rows.find(r=>r.case===v)?.scenario_name?' · '+rows.find(r=>r.case===v).scenario_name:''));scenario();}
 options('project',unique(records.map(r=>r.project)),v=>data.project_names[v]||v);
+options('summary-project',['All projects',...unique(records.map(r=>r.project))],v=>data.project_names[v]||v);
+options('summary-cohort',['Available cases','Same cases across all 4']);
+byId('profile-description').textContent=Object.entries(data.model_profiles).map(([model,profile])=>model+': '+profile).join(' · ')+'.';
+byId('summary-project').addEventListener('change',drawSummary);byId('summary-cohort').addEventListener('change',drawSummary);drawSummary();
+byId('followup-note').textContent=data.followup_count?data.followup_count+' user-requested follow-up attempts replace only their corresponding cases, regardless of success or failure. This is a targeted follow-up view; the first-attempt benchmark remains available separately.':'These are first-attempt benchmark results, with reviewed silent endings documented separately.';
+if(data.historical_count)byId('followup-note').append(node('p',data.historical_count+' earlier-profile records are kept in the historical benchmark; reasoning profiles are not mixed in the current comparison.'));
+if(data.followup_count||data.historical_count){const a=node('a','Open the original benchmark');a.href='../followup/baseline/conversation-review/Conversaciones.html';byId('followup-note').append(node('br',''),a);}
 byId('stamp').textContent='As of: '+data.generated_at+' · Unrun and blocked cases are shown explicitly.';
 byId('project').addEventListener('change',project);byId('case').addEventListener('change',scenario);byId('turn').addEventListener('change',drawConversations);
 for(const value of ['project','common','case'])byId('scope-'+value).addEventListener('click',()=>{scope=value;drawMetrics();});project();

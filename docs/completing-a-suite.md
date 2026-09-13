@@ -88,3 +88,28 @@ The watcher stops when all case dispositions are present or its bounded watch wi
 and writes `refresh-status.json`. Quota blocks count as recorded dispositions, not successful
 conversations. Language signals may still require review. Use `{execution_status}` in an
 external report note for an accurate description of recorded versus unrun combinations.
+
+## Consolidated sample statistics and follow-up views
+
+`Model-consolidated.pdf` adds one page per model with arithmetic mean, minimum,
+maximum and sample count. `Model-consolidated.csv` includes both all-project and
+per-project summaries, with available-case and common-case cohorts. Means use
+individual calls, turns or assertions, rather than averages of project medians.
+Each row identifies its sampling unit. The viewer exposes the same summary and
+explains metric formulas and total-cost scope.
+
+A private `--followup-plan` declares original/replacement run pairs with matching
+model, scenario hash and source hash. Replacements are selected regardless of their
+outcome. Original evidence and its report remain separately available. This targeted
+follow-up view is not an unbiased new first-attempt reliability estimate.
+`--historical-runs-file` keeps a previous reasoning profile out of the current view;
+the generator rejects mixed profiles under one model. Profiles are derived from
+recorded model settings. Reducing reasoning effort does not imply disabling thinking.
+
+A stopped serial execution may be reconciled only through an explicit termination
+and code audit using `reconcile_stopped_serial`. It requires single-case, single-worker,
+one-attempt execution, proof that the process stopped, and a matching review of the
+runner, storage and retry-free transport code. The full cost bound is retained for
+every recorded call plus one possible unrecorded in-flight request. The original
+manifest remains incomplete, evidence is hashed, and the ledger update is locked
+and idempotent. Parallel, unverified or changed evidence cannot use this path.
