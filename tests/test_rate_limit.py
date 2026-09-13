@@ -60,3 +60,13 @@ def test_pacing_wait_is_excluded_from_request_latency(monkeypatch, scenario, scr
 def test_invalid_limits(values):
     with pytest.raises(ValueError):
         RequestPacer(*values)
+
+
+def test_input_only_quota_still_paces_complete_input(monkeypatch):
+    clock = fake_clock(monkeypatch)
+    pacer = RequestPacer(1000, 1, input_margin=1, include_output_tokens=False)
+    pacer.acquire(600, 4096)
+    pacer.acquire(600, 4096)
+    assert clock[0] == 161
+    with pytest.raises(RateLimitCapacityError):
+        pacer.acquire(1001, 1)

@@ -6,6 +6,7 @@ import io
 import json
 import os
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from check_public import guard_data, violations
@@ -13,6 +14,7 @@ from dotenv import load_dotenv
 from pypdf import PdfReader
 
 from llm_bench import config
+from llm_bench.adjudication import silent_close
 from llm_bench.experiment import inputs
 from llm_bench.onepager import render, summarize
 from llm_bench.privacy import external_path, fingerprint, write_private
@@ -20,21 +22,26 @@ from llm_bench.report import conversation_review, read_lines
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
     for name in ("data-dir", "config-dir", "budget-file", "out", "guard", "env-file"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--run-root", type=Path, action="append", required=True)
     parser.add_argument("--cost-root", type=Path, required=True)
     parser.add_argument("--exclude-runs-file", type=Path)
+    parser.add_argument("--adjudication-policy", type=Path)
     parser.add_argument("--note", action="append", default=[])
     args = parser.parse_args()
     load_dotenv(external_path(args.env_file), override=True)
     os.environ["BENCH_PRIVATE_GUARD"] = str(external_path(args.guard))
     pairs = inputs(args.data_dir, [], True)
     expected = {(fingerprint(s.model_dump()), b.source_sha256) for b, s in pairs}
+    pair_lookup = {(fingerprint(s.model_dump()), b.source_sha256): (b, s) for b, s in pairs}
+    policies = (json.loads(external_path(args.adjudication_policy).read_text())
+                if args.adjudication_policy else {})
+    adjudications = []
     planned = Counter(b.project for b, s in pairs)
     names = {"mistral-small-4": "Mistral Small 4", "glm-5.3-flash": "GLM 5.3 Flash",
-             "gpt-oss-120b": "GPT-OSS 120B", "gemma-4-31b": "Gemma 4 31B"}
+             "gpt-oss-120b": "GPT-OSS 120B", "gemma-4-31b": "Gemma 4 31B (mín.)"}
     excluded = set()
     if args.exclude_runs_file:
         excluded = set(json.loads(external_path(args.exclude_runs_file).read_text())["ids"])
@@ -52,10 +59,17 @@ def main():
                 if key in observations:
                     raise ValueError("Duplicate observation: explicitly select diagnostic exclusions")
                 observations.add(key)
+                transcript_path = path.parent / "transcripts" / f"{run['run_id']}.json"
+                transcript = json.loads(transcript_path.read_text())
+                bundle, scenario = pair_lookup[identity]
+                corrected = silent_close(transcript, scenario, bundle,
+                                         policies.get(run["project"], {}))
+                if corrected:
+                    run = corrected["summary"]
+                    adjudications.append({"run_id": run["run_id"], **corrected["adjudication"]})
                 runs.append(run)
                 sources[run["run_id"]] = path.parent
-                calls.extend(c for c in read_lines(path.parent / "calls.jsonl")
-                             if c.get("run_id") == run["run_id"])
+                calls.extend(corrected["calls"] if corrected else transcript["calls"])
     costs, seen_calls, unknown = defaultdict(float), set(), 0
     for path in external_path(args.cost_root).rglob("calls.jsonl"):
         for call in read_lines(path):
@@ -72,6 +86,8 @@ def main():
     data = summarize(runs, calls, planned, names, known_costs=costs, reserved=reserved,
                      notes=args.note)
     data["calls_without_measured_cost"] = unknown
+    data["generated_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    data["adjudicated_silent_closes"] = len(adjudications)
     data["pricing_sources"] = {k: v.get("source_url") for k, v in
                                config.yaml_data(args.config_dir / "pricing.yaml")["models"].items()
                                if k in names}
@@ -96,6 +112,7 @@ def main():
         original = sources[run["run_id"]] / "transcripts" / f"{run['run_id']}.json"
         write_private(review / "transcripts" / original.name, json.loads(original.read_text()))
     conversation_review(review)
+    write_private(review / "adjudications.json", adjudications)
     write_private(out / "validation.json", {"pages": 1, "publication_guard_passed": True,
                   "selected_conversations": len(runs), "excluded_diagnostics": len(excluded),
                   "private_review_directory": "../conversation-review"})

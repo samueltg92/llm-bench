@@ -159,7 +159,10 @@ def test_rate_limit_wait_is_separate_from_latency(scenario, scripted, monkeypatc
     assert second["ttft_ms"] == second["total_latency_ms"] == 0
 
 
-def test_completed_silence_after_route_preserves_question_and_usage(bundle, model, bench, tmp_path):
+@pytest.mark.parametrize("finish_reason", ["stop", "FinishReason.STOP"])
+def test_completed_silence_after_route_preserves_question_and_usage(
+    bundle, model, bench, tmp_path, finish_reason
+):
     from llm_bench.providers.base import StreamEvent, Usage
     from llm_bench.scenario import Scenario
 
@@ -179,7 +182,7 @@ def test_completed_silence_after_route_preserves_question_and_usage(bundle, mode
             elif self.count == 3:
                 yield StreamEvent(kind="text", text="Puedo orientarte con tu consulta.")
             yield StreamEvent(kind="usage", usage=Usage(prompt_tokens=100, completion_tokens=20))
-            yield StreamEvent(kind="done", finish_reason="stop")
+            yield StreamEvent(kind="done", finish_reason=finish_reason)
 
     s = Scenario(
         id="route_wait",

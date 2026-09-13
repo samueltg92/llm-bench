@@ -56,3 +56,17 @@ Read these limits alongside the results:
 
 The PDF must pass text/metadata publication checks and a visual one-page review before sharing.
 Binary reports remain outside the code repository, even when the contents are anonymized.
+
+## Reviewed silent closes
+
+An empty API response is not automatically a failed conversation. An external, source-hash-bound
+adjudication policy may identify logical terminal nodes where the original prompt requires silence
+after a farewell. The report applies that policy identically to every model, only when all scripted
+turns were reached, a farewell was already spoken, a valid route reached the approved terminal,
+and the API ended with a normal STOP. Truncated responses, missing turns and transport errors do
+not qualify. Shared route maps on logical terminals require explicit review in the policy.
+
+The interpreter never edits raw transcripts, fabricates TTFT or makes extra API requests. It writes
+an audit record next to the private conversation review. Empty responses outside the reviewed
+condition remain failures. Google and OpenAI-compatible normal STOP representations are treated
+equally when yielding to a question already spoken immediately before routing.

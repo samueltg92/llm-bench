@@ -26,7 +26,7 @@ def summarize(runs, calls, planned, model_names, *, known_costs, reserved, notes
         for model, name in model_names.items():
             selected = [r for r in runs if r["project"] == project and r["model_key"] == model]
             evaluable = [r for r in selected if r["status"] not in {
-                "error", "skipped_context", "context_failed",
+                "error", "skipped_context", "context_failed", "quota_capacity",
             }]
             evaluated_total += len(evaluable)
             ids = {r["run_id"] for r in selected if r["status"] == "ok"}
@@ -170,7 +170,8 @@ def render(data, out: Path):
         "los proyectos por segmento se evalúan por separado. <b>Tools.</b> Function calls nativos "
         "con respuestas simuladas; no se mide el backend. Las interfaces de plataforma asumidas "
         "se marcan como no verificadas. <b>Medición.</b> Una ejecución por caso, sin reintentos "
-        "automáticos; uso reportado por API, tarifas documentadas y tope de USD25 por modelo. "
+        "automáticos; proveedores seriales con tandas que pueden coincidir entre proveedores. "
+        "Uso reportado por API, tarifas documentadas y tope de USD25 por modelo. "
         "Los rechazos por cuota se distinguen de los fallos del LLM.",
         margin, y, usable, size=8) - 10
     y = paragraph("LECTURA Y LÍMITES", margin, y, usable, size=10, bold=True) - 5
@@ -184,7 +185,8 @@ def render(data, out: Path):
         raise ValueError("One-pager overflow; shorten notes before exporting")
     c.setStrokeColor(colors.HexColor("#D8E2E9"))
     c.line(margin, 29, width - margin, 29)
-    paragraph("Resultados anonimizados · Prompts y conversaciones bajo resguardo privado · 1 / 1",
+    paragraph("Corte: " + html.escape(data.get("generated_at_utc", ""))
+              + " · Resultados anonimizados · Conversaciones privadas · 1 / 1",
               margin, 22, usable, size=7, color=gray)
     c.save()
     pdf.chmod(0o600)

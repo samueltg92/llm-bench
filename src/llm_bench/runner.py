@@ -16,6 +16,7 @@ from .pricing import calculate, usage_record
 from .privacy import fingerprint, write_private
 from .prompt import build, prepare
 from .providers.base import Usage
+from .rate_limit import RateLimitCapacityError
 from .scenario import render
 from .tokens import count, request_tokens
 
@@ -416,7 +417,7 @@ def conversation(
                     )
                 if (
                     row["status"] == "empty_response"
-                    and row["finish_reason"] == "stop"
+                    and row["finish_reason"] in {"stop", "STOP", "FinishReason.STOP"}
                     and call_index > 0
                     and "?" in turn_text
                     and calls[-1]["active_node_before"] != calls[-1]["active_node_after"]
@@ -525,7 +526,7 @@ def conversation(
             ):
                 break
     except Exception as exc:
-        status = "error"
+        status = "quota_capacity" if isinstance(exc, RateLimitCapacityError) else "error"
         transcript["error_type"] = type(exc).__name__
         # Errors may embed private inputs or credentials; never serialize exception bodies.
     finally:
@@ -555,6 +556,7 @@ def conversation(
         summary = {
             **base,
             "status": status,
+            "error_type": transcript.get("error_type"),
             "degraded": degraded,
             "effective_modes": sorted({c.get("prompt_mode_effective", effective) for c in calls}),
             "routing_path": path,
