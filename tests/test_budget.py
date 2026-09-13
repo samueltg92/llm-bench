@@ -277,3 +277,67 @@ def test_post_request_processing_error_still_retains_attempt(
     assert len(scripted.requests) == 1
     settle_completed(path, directory)
     assert amount_from_file(path) == call_bound(model, price, scenario.max_output_tokens)
+
+
+def usage_evidence(tmp_path):
+    from llm_bench.budget import settle_completed
+
+    path = scoped_ledger(tmp_path)
+    entry = reserve(path, 1, "benchmark", allocations={"model-a": 1})
+    directory = completed_manifest(tmp_path, entry, {"model-a": ".0024"})
+    target = directory / "manifest.json"
+    manifest = json.loads(target.read_text())
+    manifest["models"] = {"model-a": Model(
+        provider="openai_compat", model_id="synthetic", context_window=1000
+    ).model_dump()}
+    manifest["pricing"] = {"model-a": {"input": 1, "output": 2, "last_verified": "synthetic"}}
+    manifest["budget_usage"]["model-a"]["attempts"] = 2
+    target.write_text(json.dumps(manifest))
+    call = {"call_id": "a", "model_key": "model-a", "max_output_tokens": 100,
+            "attempts": [
+                {"attempt": 1, "status": "error", "usage": {}},
+                {"attempt": 2, "status": "ok", "usage": {
+                    "source": "provider", "prompt_tokens": 50, "completion_tokens": 10,
+                    "cached_prompt_tokens": 50,
+                }},
+            ]}
+    (directory / "calls.jsonl").write_text(json.dumps(call) + "\n")
+    settle_completed(path, directory)
+    return path, directory
+
+
+def test_usage_audit_keeps_failed_attempt_and_full_output_ignores_cache(tmp_path):
+    from llm_bench.budget import reconcile_usage
+
+    path, directory = usage_evidence(tmp_path)
+    reconcile_usage(path, directory)
+    assert amount_from_file(path) == Decimal(".001450")
+    before = path.read_bytes()
+    reconcile_usage(path, directory)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "overspend", "estimated"])
+def test_usage_audit_never_releases_uncertain_capacity(tmp_path, fault):
+    from llm_bench.budget import reconcile_usage
+
+    path, directory = usage_evidence(tmp_path)
+    target = directory / "calls.jsonl"
+    call = json.loads(target.read_text())
+    if fault == "missing":
+        call["attempts"].pop()
+    elif fault == "overspend":
+        call["attempts"][1]["usage"]["prompt_tokens"] = 2000
+    elif fault == "estimated":
+        call["attempts"][1]["usage"]["source"] = "estimated"
+    target.write_text(json.dumps(call) + "\n")
+    if fault == "duplicate":
+        target.write_text(target.read_text() * 2)
+    before = path.read_bytes()
+    if fault == "estimated":
+        reconcile_usage(path, directory)
+        assert amount_from_file(path) == Decimal(".0024")
+    else:
+        with pytest.raises(ValueError):
+            reconcile_usage(path, directory)
+        assert path.read_bytes() == before

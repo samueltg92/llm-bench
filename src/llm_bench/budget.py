@@ -181,3 +181,118 @@ def settle_completed(path: Path, run_dir: Path):
         }
         _save(path, state)
         return entry["settlement"]
+
+
+def reconcile_usage(path: Path, run_dir: Path):
+    """Audit complete attempt logs; retain uncached input plus full output allowance.
+
+    Unknown or failed attempts retain their full context bound. This releases
+    demonstrably unused input capacity, not invoice charges or historical margins.
+    Missing attempt records fail closed, including post-transport processing errors.
+    """
+    import fcntl
+    import hashlib
+
+    from .config import Model
+
+    path, run_dir = external_path(path), external_path(run_dir)
+    manifest_bytes = (run_dir / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if manifest.get("execution_complete") is not True:
+        raise ValueError("Only completed executions can reconcile usage")
+    call_bytes = (run_dir / "calls.jsonl").read_bytes()
+    calls = [json.loads(line) for line in call_bytes.splitlines() if line.strip()]
+    counts = {k: 0 for k in manifest["budget_usage"]}
+    retained = {k: amount(0) for k in counts}
+    full_bounds = {k: amount(0) for k in counts}
+    seen = set()
+    for call in calls:
+        if call.get("call_id"):
+            if call["call_id"] in seen:
+                raise ValueError("Duplicate call records")
+            seen.add(call["call_id"])
+        attempts = call.get("attempts", [])
+        if not attempts:
+            if call.get("status") not in {"skipped_context", "context_failed"}:
+                raise ValueError("Missing attempt evidence")
+            continue
+        key = call["model_key"]
+        model = Model.model_validate(manifest["models"][key])
+        price = manifest["pricing"][key]
+        output = call.get("max_output_tokens", 512 if call.get("warmup") else None)
+        if not isinstance(output, int) or output < 1:
+            raise ValueError("Missing output allowance")
+        bound = call_bound(model, price, output)
+        for index, attempt in enumerate(attempts, 1):
+            if attempt["attempt"] != index:
+                raise ValueError("Invalid attempt sequence")
+            counts[key] += 1
+            full_bounds[key] += bound
+            value = bound
+            usage = attempt.get("usage", {})
+            prompt, completion = usage.get("prompt_tokens"), usage.get("completion_tokens")
+            if attempt["status"] == "ok" and usage.get("source") == "provider":
+                if all(type(v) is int and v >= 0 for v in (prompt, completion)):
+                    reasoning = usage.get("reasoning_tokens", 0)
+                    if type(reasoning) is not int or reasoning < 0:
+                        raise ValueError("Invalid reasoning usage")
+                    charged_output = completion + (
+                        0 if usage.get("reasoning_included", True) else reasoning
+                    )
+                    value = amount(
+                        (prompt * amount(price["input"])
+                         + max(output, charged_output) * amount(price["output"]))
+                        / Decimal(1_000_000)
+                    )
+                    if value > bound:
+                        raise ValueError("Reported usage exceeds reserved request bound")
+            retained[key] += value
+    for key, evidence in manifest["budget_usage"].items():
+        if counts[key] != evidence["attempts"]:
+            raise ValueError("Recorded attempts do not match transport counter")
+        if full_bounds[key] != amount(evidence["retained_usd"]):
+            raise ValueError("Recorded bounds do not match transport accounting")
+    evidence_hash = hashlib.sha256(manifest_bytes + b"\0" + call_bytes).hexdigest()
+    fd = os.open(path.with_suffix(path.suffix + ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = json.loads(path.read_text())
+        matches = [r for r in state["reservations"]
+                   if r.get("id") == manifest["budget_reservation_id"]]
+        if len(matches) != 1:
+            raise ValueError("Execution must match exactly one reservation")
+        entry = matches[0]
+        settlement = entry.get("settlement", {})
+        if settlement.get("run_dir") != str(run_dir):
+            raise ValueError("Capacity settlement required before usage reconciliation")
+        if "usage_reconciliation" in entry:
+            previous = entry["usage_reconciliation"]
+            if previous["evidence_sha256"] != evidence_hash:
+                raise ValueError("Reconciled evidence has changed")
+            return previous
+        old = {k: amount(v) for k, v in settlement["retained_by_model_usd"].items()}
+        if old != full_bounds:
+            raise ValueError("Settled bounds do not match evidence")
+        released = {k: old[k] - retained[k] for k in old}
+        pools = state.get("models")
+        total = amount(state["reserved_usd"])
+        if pools and sum(amount(v["reserved_usd"]) for v in pools.values()) != total:
+            raise ValueError("Inconsistent cumulative and per-model budget")
+        if any(v < 0 for v in released.values()) or sum(released.values()) > total:
+            raise ValueError("Invalid release")
+        if pools:
+            for key, value in released.items():
+                if value > amount(pools[key]["reserved_usd"]):
+                    raise ValueError("Release would make model balance negative")
+            for key, value in released.items():
+                pools[key]["reserved_usd"] = str(amount(pools[key]["reserved_usd"]) - value)
+        state["reserved_usd"] = str(total - sum(released.values()))
+        entry["usage_reconciliation"] = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "evidence_sha256": evidence_hash,
+            "basis": "provider_uncached_input_plus_full_output_allowance_not_invoice",
+            "retained_by_model_usd": {k: str(v) for k, v in retained.items()},
+            "released_by_model_usd": {k: str(v) for k, v in released.items()},
+        }
+        _save(path, state)
+        return entry["usage_reconciliation"]

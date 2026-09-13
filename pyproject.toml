@@ -16,6 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.5,<1"]
+report = [
+    "pymupdf>=1.28.2",
+    "pypdf>=6.18.1",
+    "reportlab>=5.0.1",
+]
 
 [project.scripts]
 vbench = "llm_bench.cli:app"

@@ -8,7 +8,7 @@ import typer
 from dotenv import load_dotenv
 
 from . import config
-from .budget import amount, call_bound, settle_completed
+from .budget import amount, call_bound, reconcile_usage, settle_completed
 from .budget import reserve as reserve_budget
 from .experiment import execute, inputs, plan
 from .extract import extract as parse_export
@@ -264,6 +264,10 @@ def run(
     )
     if reservation:
         settle_completed(ledger_path, directory)
+        try:
+            reconcile_usage(ledger_path, directory)
+        except (ValueError, KeyError, OSError):
+            emit({"usage_reconciliation": "incomplete_evidence_full_bounds_retained"})
     rows = make_report(directory)
     emit({"run_dir": str(directory), "report_rows": len(rows), "synthetic": offline_demo})
 

@@ -137,7 +137,8 @@ def plan(pairs, models, prices, bench, modes, dedup=False):
 
 
 def execute(
-    pairs, models, prices, bench, modes, out, dedup=False, preflight=None, reservation=None
+    pairs, models, prices, bench, modes, out, dedup=False, preflight=None, reservation=None,
+    request_pacers=None,
 ):
     out = external_path(out)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ") + "-" + uuid.uuid4().hex[:8]
@@ -194,7 +195,9 @@ def execute(
         if reservation:
             provider = ReservedProvider(provider, model, prices[key], reservation["models"][key])
         rate_config = bench.get("rate_limits_by_model", {}).get(key)
-        if rate_config:
+        if request_pacers and key in request_pacers:
+            provider.request_pacer = request_pacers[key]
+        elif rate_config:
             provider.request_pacer = RequestPacer(**rate_config)
         provider.min_request_interval_s = max(0, float(bench.get("min_request_interval_s", 0)))
         try:
@@ -235,7 +238,7 @@ def execute(
                         copy.deepcopy(bench),
                         directory,
                         mode=mode,
-                        repetition=repetition,
+                        repetition=repetition + bench.get("suite_repetition", 1) - 1,
                         dedup=dedup,
                     )
         finally:

@@ -35,6 +35,13 @@ class OpenAICompat:
         if self.model.include_usage:
             params["stream_options"] = {"include_usage": True}
         with self.client.chat.completions.create(**params) as stream:
+            headers = getattr(getattr(stream, "response", None), "headers", {})
+            self.last_rate_limit_headers = {
+                name: int(headers[name]) for name in (
+                    "x-ratelimit-limit-requests", "x-ratelimit-limit-tokens",
+                    "x-ratelimit-remaining-requests", "x-ratelimit-remaining-tokens",
+                ) if str(headers.get(name, "")).isdigit()
+            }
             for chunk in stream:
                 if chunk.usage:
                     usage = chunk.usage

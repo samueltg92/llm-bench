@@ -116,6 +116,9 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
             "partial_tools": list(tool_deltas.values()),
             "usage": asdict(usage),
             "rate_limit_wait_ms": rate_wait_ms,
+            "http_status": (
+                getattr(error, "status_code", None) or getattr(error, "code", None)
+            ) if error else None,
         }
         attempts.append(attempt_data)
         if error and retryable(error) and attempt + 1 < policy["max_attempts"]:
@@ -193,6 +196,9 @@ def measure(provider, messages, tools, scenario, price, retries=None, tool_mode=
             "spend_complete": not error and attempt == 0,
             "attempts": attempts,
             "tool_calls_count": len(tool_calls),
+            "rate_limit_headers": getattr(
+                getattr(provider, "provider", provider), "last_rate_limit_headers", {}
+            ),
         }
         if not error and finish in {"length", "MAX_TOKENS", "FinishReason.MAX_TOKENS"}:
             row["status"] = "output_limit"
