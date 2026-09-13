@@ -246,3 +246,21 @@ está disponible; no se inventan costos ni métricas para errores o saltos. Con 
 p95 es exploratorio. El umbral de contexto del 85% es preventivo, no una degradación demostrada.
 
 Consulta [seguridad](SECURITY.md) y [decisiones de diseño](docs/design.md).
+
+## Informe ejecutivo y revisión privada
+
+Instala el extra `report` para generar el PDF con `scripts/create_onepager.py`.
+El comando recibe directorios externos de escenarios, resultados, configuración y
+presupuesto; `--help` muestra los argumentos. También admite un archivo privado
+de argumentos, uno por línea, con `@/ruta/privada/report-args.txt`.
+
+El PDF resume cobertura, rutas, function calls esperados, reglas explícitas,
+medianas de latencia y costos conocidos. Las conversaciones rechazadas por cuota
+o contexto no se incluyen en porcentajes de calidad. Los CSV detallan resultados
+y disposición de cada caso. La cobertura de nodos cuenta prompts con respuesta
+aceptada por la API, sin inferir que todos los nodos del origen fueron evaluados.
+
+`Conversaciones.html`, en el directorio privado de revisión, permite comparar dos
+modelos para el mismo caso sin conexión. Incluye los historiales originales y los
+resultados simulados de tools; nunca debe publicarse. Los cierres silenciosos y las
+señales de idioma revisadas se documentan por separado, sin editar los registros.

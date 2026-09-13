@@ -20,6 +20,7 @@ from llm_bench.language_review import review_signals
 from llm_bench.onepager import render, summarize
 from llm_bench.privacy import external_path, fingerprint, write_private
 from llm_bench.report import conversation_review, read_lines
+from llm_bench.review_html import render_review
 
 
 def main():
@@ -121,12 +122,59 @@ def main():
     write_private(out / "Resultados-detallados.csv", buffer.getvalue(), plain=True)
     # Private review bundle is kept separate from the sanitized deliverable.
     review = out.parent / "conversation-review"
+    originals = {}
     for run in runs:
         original = sources[run["run_id"]] / "transcripts" / f"{run['run_id']}.json"
-        write_private(review / "transcripts" / original.name, json.loads(original.read_text()))
+        originals[run["run_id"]] = json.loads(original.read_text())
+        write_private(review / "transcripts" / original.name, originals[run["run_id"]])
     conversation_review(review)
     write_private(review / "adjudications.json", adjudications)
     write_private(review / "language-review.json", language_reviews)
+    comparisons, coverage = [], []
+    case_numbers = Counter()
+    adjudicated_ids = {a["run_id"] for a in adjudications}
+    for bundle, scenario in pairs:
+        case_numbers[bundle.project] += 1
+        alias = f"P{bundle.project.split('_')[-1]}-C{case_numbers[bundle.project]:02d}"
+        scenario_hash = fingerprint(scenario.model_dump())
+        for model, name in names.items():
+            matches = [r for r in runs if r["model_key"] == model
+                       and r["scenario_sha256"] == scenario_hash
+                       and r["source_sha256"] == bundle.source_sha256]
+            for run in matches or [None]:
+                row = {"project": "Proyecto " + bundle.project.split("_")[-1],
+                       "case": alias, "model": name,
+                       "repetition": run["repetition"] if run else 1,
+                       "status": run["status"] if run else "not_run",
+                       "path_match": run.get("expected_path_match") if run else None}
+                coverage.append(row)
+                original = originals[run["run_id"]] if run else {}
+                comparisons.append({**row, "case": alias + f" · R{row['repetition']}",
+                                    "history": original.get("history", []),
+                                    "raw_status": original.get("summary", {}).get("status", "not_run"),
+                                    "adjudicated": bool(run and run["run_id"] in adjudicated_ids)})
+    render_review(comparisons, review / "Conversaciones.html")
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
+    writer.writeheader()
+    writer.writerows(coverage)
+    write_private(out / "Cobertura-casos.csv", buffer.getvalue(), plain=True)
+    # Only calls with an accepted response count as observed node prompts.
+    node_coverage = []
+    bundles = {b.project: b for b, _ in pairs}
+    for project, bundle in bundles.items():
+        nonempty = {n.id for n in bundle.nodes if n.prompt.strip()}
+        for model, name in names.items():
+            observed = {c.get("active_node_before") for c in calls
+                        if c.get("model_key") == model and c.get("project") == project
+                        and c.get("usage_source") == "provider"
+                        and c.get("status") in {"ok", "empty_response", "output_limit"}}
+            node_coverage.append({"project": "Proyecto " + project.split("_")[-1],
+                                  "model": name, "nodes_in_source": len(bundle.nodes),
+                                  "nodes_with_text": len(nonempty),
+                                  "nodes_observed": len(observed & nonempty),
+                                  "global_prompt_included": bool(bundle.global_system and observed)})
+    write_private(out / "Cobertura-nodos.json", node_coverage)
     write_private(out / "validation.json", {"pages": 1, "publication_guard_passed": True,
                   "selected_conversations": len(runs), "excluded_diagnostics": len(excluded),
                   "private_review_directory": "../conversation-review"})
