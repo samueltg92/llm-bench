@@ -101,7 +101,7 @@ def test_private_conversation_review_preserves_dialogue_and_tools(tmp_path):
         < output.index("Un momento.")
         < output.index('&quot;name&quot;: &quot;consultar&quot;')
     )
-    assert "consultar" in output and "Resultado simulado" in output
+    assert "consultar" in output and "Simulated result" in output
     assert "INTERNAL_ANALYSIS" not in output
     assert "<script>" not in output and "&lt;script&gt;" in output
     assert "routing_path" in output

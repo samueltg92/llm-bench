@@ -54,7 +54,7 @@ def summarize(runs, calls, planned, model_names, *, known_costs, reserved, notes
             )]
             route_runs = [r for r in evaluable if r.get("expected_path_match") is not None]
             rows.append({
-                "project": "Proyecto " + project.split("_")[-1], "model": name,
+                "project": "Project " + project.split("_")[-1], "model": name,
                 "planned": count, "tested": len(selected), "complete": len(ids),
                 "evaluable": len(evaluable), "infrastructure_errors": len(selected) - len(evaluable),
                 "strict_pass": sum(r["status"] == "ok"
@@ -110,9 +110,9 @@ def render(data, out: Path):
     pdf = out / "Benchmark-LLM.pdf"
     width, height = A4
     c = canvas.Canvas(str(pdf), pagesize=A4, pageCompression=1)
-    c.setTitle("Benchmark de LLM — resultados y metodología")
+    c.setTitle("LLM benchmark — results and methodology")
     c.setAuthor("LLM Benchmark")
-    c.setSubject("Comparación anonimizada de modelos en conversaciones en español")
+    c.setSubject("Anonymized model comparison using Spanish conversations")
     navy, teal, gray = colors.HexColor("#142B42"), colors.HexColor("#087F8C"), colors.HexColor("#536575")
     margin, usable = 34, width - 68
 
@@ -129,26 +129,26 @@ def render(data, out: Path):
 
     c.setFillColor(navy)
     c.rect(0, height - 104, width, 104, fill=1, stroke=0)
-    paragraph("EVALUACIÓN CONVERSACIONAL · ESPAÑOL", margin, height - 22, usable,
+    paragraph("CONVERSATIONAL EVALUATION · SPANISH", margin, height - 22, usable,
               size=8, color=colors.HexColor("#9ADDE0"), bold=True)
-    paragraph("Benchmark de LLM", margin, height - 41, usable, size=25,
+    paragraph("LLM Benchmark", margin, height - 41, usable, size=25,
               color=colors.white, bold=True)
-    paragraph("Resultados observados y metodología de prueba", margin, height - 77, usable,
+    paragraph("Observed results and test methodology", margin, height - 77, usable,
               size=10, color=colors.HexColor("#D9E4EC"))
     y = height - 122
-    cards = [(str(data["models"]), "modelos"), (str(data["planned_cases"]), "casos por modelo"),
-             (f'{data["evaluable"]}/{data["planned_combinations"]}', "casos evaluables"),
-             (f'USD {sum(data["known_costs"].values()):.2f}', "costo calculado acumulado")]
+    cards = [(str(data["models"]), "models"), (str(data["planned_cases"]), "cases per model"),
+             (f'{data["evaluable"]}/{data["planned_combinations"]}', "evaluable cases"),
+             (f'USD {sum(data["known_costs"].values()):.2f}', "cumulative calculated cost")]
     cw = usable / 4
     for i, (value, label) in enumerate(cards):
         paragraph(value, margin + i * cw, y, cw - 8, size=18, color=teal, bold=True)
         paragraph(label, margin + i * cw, y - 25, cw - 8, size=7.5, color=gray)
     y -= 61
-    y = paragraph("RESULTADOS POR PROYECTO", margin, y, usable, size=10, bold=True) - 8
-    headings = ["Proyecto / modelo", "Casos", "Termina", "Ruta", "Tools (1)", "Reglas (2)", "TTFT (3)", "Latencia", "USD (4)"]
+    y = paragraph("RESULTS BY PROJECT", margin, y, usable, size=10, bold=True) - 8
+    headings = ["Project / model", "Cases", "Done", "Flow", "Tools (1)", "Rules (2)", "TTFT (3)", "Latency", "USD (4)"]
     cells = [headings]
     for r in data["rows"]:
-        cells.append([r["project"].replace("Proyecto ", "P") + " · " + r["model"],
+        cells.append([r["project"].replace("Project ", "P") + " · " + r["model"],
                       f'{r["evaluable"]}/{r["planned"]}' + ("*" if r["infrastructure_errors"] else ""),
                       pct(r["complete"], r["evaluable"]),
                       pct(r["paths_passed"], r["paths_total"]),
@@ -171,38 +171,38 @@ def render(data, out: Path):
     table.drawOn(c, margin, y - th)
     y -= th + 8
     y = paragraph(
-        "Termina = conversación completa; Ruta = hitos esperados en orden, admite pasos adicionales. "
-        "* Hay rechazos de proveedor/contexto excluidos de los porcentajes de calidad. "
-        "(1) Llamados esperados: nombre, argumentos y turno; no basta anunciarlos. "
-        "(2) Comprobaciones explícitas del caso; no cubren todas las reglas del prompt. "
-        "(3) TTFT: primer texto o delta de tool; latencia: respuesta completa. Medianas por llamada "
-        "en conversaciones completas, sin espera por cuota. (4) Costo conocido de los casos de la tabla.",
+        "Done = complete conversation; Flow = expected milestones in order, allowing extra steps. "
+        "* Provider/context rejections are excluded from quality percentages. "
+        "(1) Expected function calls: name, arguments and turn; announcing a call is insufficient. "
+        "(2) Explicit case checks; these do not cover every prompt rule. "
+        "(3) TTFT: first text or tool delta; latency: full response. Per-call medians "
+        "from complete conversations, excluding quota waits. (4) Known cost of the cases in this table.",
         margin, y, usable, size=7, color=gray) - 12
-    y = paragraph("CÓMO SE HIZO", margin, y, usable, size=10, bold=True) - 6
+    y = paragraph("METHODOLOGY", margin, y, usable, size=10, bold=True) - 6
     y = paragraph(
-        "<b>Entradas.</b> Prompts originales completos, sin recortes; mismos casos y datos de prueba "
-        "por modelo. Usuarios simulados con guiones deterministas y respuestas por rama. "
-        "<b>Flujo.</b> Se conserva el historial y se siguen las transiciones entre nodos; "
-        "los proyectos por segmento se evalúan por separado. <b>Tools.</b> Function calls nativos "
-        "con respuestas simuladas; no se mide el backend. Las interfaces de plataforma asumidas "
-        "se marcan como no verificadas. <b>Medición.</b> Una ejecución por caso, sin reintentos "
-        "automáticos; proveedores seriales con tandas que pueden coincidir entre proveedores. "
-        "Uso reportado por API, tarifas documentadas y tope de USD25 por modelo. "
-        "Los rechazos por cuota se distinguen de los fallos del LLM.",
+        "<b>Inputs.</b> Full original prompts, without truncation; identical cases and test data "
+        "across models. Simulated users follow deterministic scripts with branch-specific responses. "
+        "<b>Flow.</b> History is retained and node transitions are followed; "
+        "segment-based projects are evaluated separately. <b>Tools.</b> Native function calls "
+        "use mock responses; backend execution is not measured. Assumed platform interfaces "
+        "are marked unverified. <b>Measurement.</b> One run per case, without automatic "
+        "retries; calls are serial within each provider, with batches overlapping across providers. "
+        "API-reported usage, documented rates and a USD25 cap per model. "
+        "Quota rejections are distinguished from LLM failures.",
         margin, y, usable, size=8) - 10
-    y = paragraph("LECTURA Y LÍMITES", margin, y, usable, size=10, bold=True) - 5
+    y = paragraph("INTERPRETATION AND LIMITATIONS", margin, y, usable, size=10, bold=True) - 5
     for note in data["notes"][:3]:
         y = paragraph("• " + html.escape(note), margin, y, usable, size=7.8) - 3
     observed = " · ".join(f"{name}: {value:,}" for name, value in data["context_observed"].items())
-    y = paragraph("<b>Mayor entrada aceptada (tokens):</b> " + html.escape(observed)
-                  + ". Aceptación observada no demuestra calidad en toda la ventana anunciada.",
+    y = paragraph("<b>Largest accepted input (tokens):</b> " + html.escape(observed)
+                  + ". Observed acceptance does not establish quality across the full advertised context window.",
                   margin, y - 4, usable, size=7.3, color=gray)
     if y < 36:
         raise ValueError("One-pager overflow; shorten notes before exporting")
     c.setStrokeColor(colors.HexColor("#D8E2E9"))
     c.line(margin, 29, width - margin, 29)
-    paragraph("Corte: " + html.escape(data.get("generated_at_utc", ""))
-              + " · Resultados anonimizados · Conversaciones privadas · 1 / 1",
+    paragraph("As of: " + html.escape(data.get("generated_at_utc", ""))
+              + " · Anonymized results · Private conversations · 1 / 1",
               margin, 22, usable, size=7, color=gray)
     c.save()
     pdf.chmod(0o600)

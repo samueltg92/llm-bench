@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--language-policy", type=Path)
     parser.add_argument("--private-project-labels", type=Path,
                         help="Private display names used only in the offline conversation viewer")
+    parser.add_argument("--private-scenario-labels", type=Path,
+                        help="Private English scenario titles and descriptions, keyed by scenario hash")
     parser.add_argument("--note", action="append", default=[])
     args = parser.parse_args()
     load_dotenv(external_path(args.env_file), override=True)
@@ -49,11 +51,11 @@ def main():
     language_reviews = []
     planned = Counter(b.project for b, s in pairs)
     names = {"mistral-small-4": "Mistral Small 4", "glm-5.3-flash": "GLM 5.3 Flash",
-             "gpt-oss-120b": "GPT-OSS 120B", "gemma-4-31b": "Gemma 4 31B (mín.)"}
+             "gpt-oss-120b": "GPT-OSS 120B", "gemma-4-31b": "Gemma 4 31B (min.)"}
     excluded = set()
     if args.exclude_runs_file:
         excluded = set(json.loads(external_path(args.exclude_runs_file).read_text())["ids"])
-    runs, calls, sources = [], [], {}
+    runs, calls, sources, interpreted = [], [], {}, {}
     observations = set()
     for root in args.run_root:
         for path in sorted(external_path(root).rglob("runs.jsonl")):
@@ -79,6 +81,7 @@ def main():
                     run = corrected["summary"]
                     adjudications.append({"run_id": run["run_id"], **corrected["adjudication"]})
                 runs.append(run)
+                interpreted[run["run_id"]] = corrected or transcript
                 sources[run["run_id"]] = path.parent
                 calls.extend(corrected["calls"] if corrected else transcript["calls"])
     costs, seen_calls, unknown = defaultdict(float), set(), 0
@@ -99,7 +102,7 @@ def main():
     data["calls_without_measured_cost"] = unknown
     data["generated_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     data["adjudicated_silent_closes"] = len(adjudications)
-    def review_metrics(row, selected_runs, selected_calls):
+    def review_metrics(row, selected_runs, selected_calls, *, include_incomplete=False):
         ids = {r["run_id"] for r in selected_runs}
         decisions = Counter(r["decision"] for r in language_reviews if r["run_id"] in ids)
         row.update(language_confirmed=decisions["confirmed_foreign"],
@@ -109,6 +112,13 @@ def main():
                                          if c.get("usage_source") == "provider"
                                          and c.get("status") in {"ok", "empty_response", "output_limit"}),
                                         default=0))
+        turns = [turn for run in selected_runs if include_incomplete or run["status"] == "ok"
+                 for turn in interpreted[run["run_id"]].get("turns", [])]
+        row["turn_first_text_s"] = median(t["first_text_ms"] / 1000 for t in turns
+                                          if t.get("first_text_ms") is not None)
+        row["turn_latency_s"] = median(t["total_ms"] / 1000 for t in turns
+                                       if t.get("total_ms") is not None)
+        row["turn_samples"] = len(turns)
         return row
 
     common = common_cohort(runs, names)
@@ -119,14 +129,14 @@ def main():
     for rows, population in [(data["rows"], runs), (common_rows, common)]:
         for row in rows:
             selected = [r for r in population if names[r["model_key"]] == row["model"]
-                        and "Proyecto " + r["project"].split("_")[-1] == row["project"]]
+                        and "Project " + r["project"].split("_")[-1] == row["project"]]
             ids = {r["run_id"] for r in selected}
             review_metrics(row, selected, [c for c in calls if c.get("run_id") in ids])
     data["language_review"] = dict(Counter(r["decision"] for r in language_reviews))
     language_note = (
-        f"Idioma: {data['language_review'].get('confirmed_foreign', 0)} señales confirmadas, "
-        f"{data['language_review'].get('false_positive_spanish', 0)} falsos positivos y "
-        f"{data['language_review'].get('pending', 0)} pendientes de revisión."
+        f"Language: {data['language_review'].get('confirmed_foreign', 0)} confirmed flags, "
+        f"{data['language_review'].get('false_positive_spanish', 0)} false positives and "
+        f"{data['language_review'].get('pending', 0)} pending review."
     )
     data["notes"] = [note.replace("{language_review}", language_note) for note in data["notes"]]
     data["pricing_sources"] = {k: v.get("source_url") for k, v in
@@ -146,7 +156,7 @@ def main():
     writer = csv.DictWriter(buffer, fieldnames=list(data["rows"][0]))
     writer.writeheader()
     writer.writerows(data["rows"])
-    write_private(out / "Resultados-detallados.csv", buffer.getvalue(), plain=True)
+    write_private(out / "Detailed-results.csv", buffer.getvalue(), plain=True)
     # Private review bundle is kept separate from the sanitized deliverable.
     review = out.parent / "conversation-review"
     originals = {}
@@ -157,6 +167,8 @@ def main():
     conversation_review(review)
     write_private(review / "adjudications.json", adjudications)
     write_private(review / "language-review.json", language_reviews)
+    scenario_labels = (json.loads(external_path(args.private_scenario_labels).read_text())
+                       if args.private_scenario_labels else {})
     comparisons, coverage = [], []
     case_numbers = Counter()
     adjudicated_ids = {a["run_id"] for a in adjudications}
@@ -164,12 +176,13 @@ def main():
         case_numbers[bundle.project] += 1
         alias = f"P{bundle.project.split('_')[-1]}-C{case_numbers[bundle.project]:02d}"
         scenario_hash = fingerprint(scenario.model_dump())
+        label = scenario_labels.get(scenario_hash, {})
         for model, name in names.items():
             matches = [r for r in runs if r["model_key"] == model
                        and r["scenario_sha256"] == scenario_hash
                        and r["source_sha256"] == bundle.source_sha256]
             for run in matches or [None]:
-                row = {"project": "Proyecto " + bundle.project.split("_")[-1],
+                row = {"project": "Project " + bundle.project.split("_")[-1],
                        "case": alias, "model": name,
                        "repetition": run["repetition"] if run else 1,
                        "status": run["status"] if run else "not_run",
@@ -186,10 +199,11 @@ def main():
                                       ("latency_s", "total_latency_ms")]:
                     case_metrics[field] = median(c[source] / 1000 for c in accepted
                                                  if c.get(source) is not None)
-                review_metrics(case_metrics, [run] if run else [], selected_calls)
+                review_metrics(case_metrics, [run] if run else [], selected_calls,
+                               include_incomplete=True)
                 comparisons.append({**row, "case": alias + f" · R{row['repetition']}",
-                                    "description": scenario.description,
-                                    "scenario_name": scenario.id.removeprefix(bundle.project + "_").replace("_", " "),
+                                    "description": label.get("description", "Original scenario content is preserved in the private source files."),
+                                    "scenario_name": label.get("title", "Scenario " + alias),
                                     "metrics": case_metrics,
                                     "history": original.get("history", []),
                                     "raw_status": original.get("summary", {}).get("status", "not_run"),
@@ -197,7 +211,7 @@ def main():
     private_names = {}
     if args.private_project_labels:
         labels = json.loads(external_path(args.private_project_labels).read_text())
-        private_names = {"Proyecto " + k.split("_")[-1]: v for k, v in labels.items()
+        private_names = {"Project " + k.split("_")[-1]: v for k, v in labels.items()
                          if k in {b.project for b, _ in pairs} and isinstance(v, str)}
     render_review(comparisons, review / "Conversaciones.html", project_rows=data["rows"],
                   common_rows=common_rows, project_names=private_names,
@@ -206,7 +220,7 @@ def main():
     writer = csv.DictWriter(buffer, fieldnames=list(coverage[0]))
     writer.writeheader()
     writer.writerows(coverage)
-    write_private(out / "Cobertura-casos.csv", buffer.getvalue(), plain=True)
+    write_private(out / "Case-coverage.csv", buffer.getvalue(), plain=True)
     # Only calls with an accepted response count as observed node prompts.
     node_coverage = []
     bundles = {b.project: b for b, _ in pairs}
@@ -217,12 +231,12 @@ def main():
                         if c.get("model_key") == model and c.get("project") == project
                         and c.get("usage_source") == "provider"
                         and c.get("status") in {"ok", "empty_response", "output_limit"}}
-            node_coverage.append({"project": "Proyecto " + project.split("_")[-1],
+            node_coverage.append({"project": "Project " + project.split("_")[-1],
                                   "model": name, "nodes_in_source": len(bundle.nodes),
                                   "nodes_with_text": len(nonempty),
                                   "nodes_observed": len(observed & nonempty),
                                   "global_prompt_included": bool(bundle.global_system and observed)})
-    write_private(out / "Cobertura-nodos.json", node_coverage)
+    write_private(out / "Node-coverage.json", node_coverage)
     write_private(out / "validation.json", {"pages": 1, "publication_guard_passed": True,
                   "selected_conversations": len(runs), "excluded_diagnostics": len(excluded),
                   "private_review_directory": "../conversation-review"})

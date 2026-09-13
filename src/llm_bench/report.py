@@ -137,8 +137,8 @@ def conversation_review(run_dir: Path, recursive=False):
     """Readable private dialogue; keep model reasoning out of the spoken transcript."""
     run_dir = external_path(run_dir)
     sections = [
-        "# Conversaciones — revisión privada",
-        "No publicar. Las respuestas de herramientas son simuladas; no verifican datos reales.",
+        "# Conversations — private review",
+        "Do not publish. Tool responses are simulated; they do not verify real records. Source messages remain in their original language.",
     ]
     paths = run_dir.rglob("transcripts/*.json") if recursive else (run_dir / "transcripts").glob("*.json")
     for path in sorted(paths):
@@ -146,7 +146,7 @@ def conversation_review(run_dir: Path, recursive=False):
         sections.extend(
             [
                 f"## {item.get('scenario', '')} / {item.get('model_key', '')}",
-                f"Registro original: {path.relative_to(run_dir)}",
+                f"Original record: {path.relative_to(run_dir)}",
             ]
         )
         for message in item.get("history", []):
@@ -154,9 +154,9 @@ def conversation_review(run_dir: Path, recursive=False):
             if role == "system":
                 continue
             label = {
-                "user": "Usuario simulado",
+                "user": "Simulated user",
                 "assistant": "LLM",
-                "tool": "Resultado simulado",
+                "tool": "Simulated result",
             }.get(role, role)
             sections.append(f"### {label}")
             # Quoted lines preserve the conversation and prevent Markdown/HTML in
@@ -173,7 +173,7 @@ def conversation_review(run_dir: Path, recursive=False):
                 )
         sections.extend(
             [
-                "### Métricas, recorrido y comprobaciones",
+                "### Metrics, route and checks",
                 "```json\n"
                 + json.dumps(item.get("summary", {}), ensure_ascii=False, indent=2)
                 + "\n```",

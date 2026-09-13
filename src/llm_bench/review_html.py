@@ -16,8 +16,8 @@ def render_review(records, path, *, project_rows=None, common_rows=None,
 
 
 TEMPLATE = """<!doctype html>
-<html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Benchmark privado por proyecto</title>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Private benchmark by project</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f2f5f8;color:#142b42;font:14px system-ui,sans-serif}
 header{padding:24px 3vw;background:#142b42;color:white}h1{font-size:26px;margin:0 0 8px}
@@ -42,13 +42,13 @@ h2{font-size:19px;margin:0 0 10px}h3{font-size:16px;margin:0 0 10px}.box{backgro
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px ui-monospace,monospace}.empty{color:#657889;font-style:italic}
 @media print{header,main{padding:12px}.scroll{overflow:visible}.panes{min-width:0;grid-template-columns:repeat(2,1fr)}.metrics{min-width:0;font-size:10px}}
 </style>
-<header><h1>Benchmark por proyecto</h1><p>Los cuatro LLM: métricas, escenarios y conversaciones en una misma comparación.</p>
-<p class="stamp" id="stamp"></p><p class="stamp">Archivo privado con nombres y contenido original. Funciona sin conexión; los resultados de tools son simulados.</p></header>
-<main><label>Proyecto<select id="project"></select></label><label>Escenario simulado<select id="case"></select></label>
-<section class="box"><div class="toolbar"><h2 id="metric-title">Métricas del proyecto</h2>
-<button id="scope-project" aria-pressed="true">Todo el proyecto</button><button id="scope-common" aria-pressed="false">Mismos casos en los 4</button><button id="scope-case" aria-pressed="false">Escenario seleccionado</button></div>
+<header><h1>Benchmark by project</h1><p>All four LLMs: metrics, scenarios and conversations in one comparison.</p>
+<p class="stamp" id="stamp"></p><p class="stamp">Private file with project names and original content. Works offline; tool responses are simulated. Source conversations remain in Spanish.</p></header>
+<main><label>Project<select id="project"></select></label><label>Simulated scenario<select id="case"></select></label>
+<section class="box"><div class="toolbar"><h2 id="metric-title">Project metrics</h2>
+<button id="scope-project" aria-pressed="true">Entire project</button><button id="scope-common" aria-pressed="false">Same cases across all 4</button><button id="scope-case" aria-pressed="false">Selected scenario</button></div>
 <div class="scroll"><table class="metrics" id="metrics"></table></div><p class="note" id="metric-note"></p></section>
-<section><div class="toolbar"><h2>Conversaciones del escenario</h2><label>Mostrar<select id="turn"></select></label></div>
+<section><div class="toolbar"><h2>Scenario conversations</h2><label>Show<select id="turn"></select></label></div>
 <p id="description" class="description"></p><div class="scroll"><div class="panes" id="panes"></div></div></section></main>
 <script type="application/json" id="records">__RECORDS__</script>
 <script>
@@ -57,8 +57,8 @@ const byId=id=>document.getElementById(id),unique=xs=>[...new Set(xs)];
 const models=unique(records.map(r=>r.model));let scope='project';
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;}
 function options(id,values,label=v=>v){byId(id).replaceChildren(...values.map(v=>{const o=node('option',label(v));o.value=v;return o;}));}
-const status=s=>({ok:'completa',not_run:'sin ejecutar',error:'error de ejecución',quota_capacity:'bloqueada por cuota',empty_response:'respuesta vacía',output_limit:'salida truncada',tool_iteration_limit:'límite de iteraciones de tools',call_limit:'límite de llamadas',skipped_context:'no cabe en contexto',context_failed:'no cabe en contexto'})[s]||s||'sin ejecutar';
-const number=n=>n===null||n===undefined?'—':Number(n).toLocaleString('es-CO');
+const status=s=>({ok:'complete',not_run:'not run',error:'execution error',quota_capacity:'quota blocked',empty_response:'empty response',output_limit:'truncated output',tool_iteration_limit:'tool iteration limit',call_limit:'call limit',skipped_context:'context exceeded',context_failed:'context exceeded'})[s]||s||'not run';
+const number=n=>n===null||n===undefined?'—':Number(n).toLocaleString('en-US');
 const seconds=n=>n===null||n===undefined?'—':Number(n).toFixed(2)+' s';
 const usd=n=>n===null||n===undefined?'—':'USD '+Number(n).toFixed(4);
 const percent=(a,b)=>b?Math.round(100*a/b)+'% ('+a+'/'+b+')':'—';
@@ -67,53 +67,54 @@ function drawMetrics(){
  const selected=selection();
  const rows=scope==='case'?selected.map(r=>({...r.metrics,model:r.model,state:r.status})):(scope==='common'?data.common_rows:data.project_rows).filter(r=>r.project===byId('project').value);
  const fields=[
-  [scope==='case'?'Estado del escenario':scope==='common'?'Casos comunes evaluables':'Casos evaluables / planificados',r=>scope==='case'?status(r.state):r.evaluable+' / '+r.planned],
-  ['Conversaciones completas',r=>percent(r.complete,r.evaluable)],
-  ['Hitos del flujo en orden',r=>percent(r.paths_passed,r.paths_total)],
-  ['Tools esperadas: nombre, argumentos y turno',r=>percent(r.tool_checks_passed,r.tool_checks_total)],
-  ['Reglas explícitas del caso',r=>percent(r.rules_passed,r.rules_total)],
-  ['TTFT · mediana por llamada',r=>seconds(r.ttft_s)],
-  ['Primer texto visible · mediana',r=>seconds(r.first_text_s)],
-  ['Latencia completa · mediana por llamada',r=>seconds(r.latency_s)],
-  ['Function calls nativos / inválidos',r=>number(r.native_calls)+' / '+number(r.invalid_calls)],
-  ['Idioma: señales confirmadas / por revisar',r=>number(r.language_confirmed)+' / '+number(r.language_pending)],
-  ['Mayor entrada aceptada · tokens',r=>number(r.max_input_tokens)],
-  ['Costo calculado conocido',r=>r.tested?usd(r.cost_usd):'—'],
-  ['Rechazos de proveedor o contexto',r=>number(r.infrastructure_errors)]
+  [scope==='case'?'Scenario status':scope==='common'?'Common evaluable cases':'Evaluable / planned cases',r=>scope==='case'?status(r.state):r.evaluable+' / '+r.planned],
+  ['Complete conversations',r=>percent(r.complete,r.evaluable)],
+  ['Ordered flow milestones',r=>percent(r.paths_passed,r.paths_total)],
+  ['Expected tools: name, arguments and turn',r=>percent(r.tool_checks_passed,r.tool_checks_total)],
+  ['Explicit case rules',r=>percent(r.rules_passed,r.rules_total)],
+  ['TTFT · median per call',r=>seconds(r.ttft_s)],
+  ['First user-facing text · median per turn',r=>seconds(r.turn_first_text_s)],
+  ['Full latency · median per call',r=>seconds(r.latency_s)],
+  ['Flow latency · median per turn',r=>seconds(r.turn_latency_s)],
+  ['Native / invalid function calls',r=>number(r.native_calls)+' / '+number(r.invalid_calls)],
+  ['Language flags: confirmed / pending',r=>number(r.language_confirmed)+' / '+number(r.language_pending)],
+  ['Largest accepted input · tokens',r=>number(r.max_input_tokens)],
+  ['Known calculated cost',r=>r.tested?usd(r.cost_usd):'—'],
+  ['Provider or context rejections',r=>number(r.infrastructure_errors)]
  ];
- const table=byId('metrics');table.replaceChildren();const head=node('thead',''),hr=node('tr','');hr.append(node('th','Métrica'));models.forEach(m=>hr.append(node('th',m)));head.append(hr);table.append(head);
+ const table=byId('metrics');table.replaceChildren();const head=node('thead',''),hr=node('tr','');hr.append(node('th','Metric'));models.forEach(m=>hr.append(node('th',m)));head.append(hr);table.append(head);
  const body=node('tbody','');for(const [index,[label,format]] of fields.entries()){const tr=node('tr','');tr.append(node('td',label));for(const model of models){const r=rows.find(x=>x.model===model);tr.append(node('td',r&&(index===0||r.tested)?format(r):'—'));}body.append(tr);}table.append(body);
- byId('metric-title').textContent=scope==='case'?'Métricas del escenario '+byId('case').value:(scope==='common'?'Casos comunes · ':'Métricas de ')+(data.project_names[byId('project').value]||byId('project').value);
- byId('metric-note').textContent=(scope==='common'?'Solo casos con observaciones evaluables en los cuatro modelos; se conservan los fallos de calidad. ':scope==='project'?'La cobertura puede diferir entre modelos. Usa «Mismos casos en los 4» para comparar una selección común. ':'')+'TTFT incluye el primer texto o delta de tool. '+(scope!=='case'?'Medianas de llamadas en conversaciones completas. ':'Medianas de llamadas aceptadas del escenario, también si la conversación quedó incompleta. ')+'Las esperas por cuota se excluyen. Los hitos admiten pasos adicionales. Las reglas son comprobaciones explícitas, no una evaluación semántica exhaustiva. Sin señal de idioma no significa ausencia garantizada de fugas. Costos calculados, no facturas; un rechazo no se puntúa como fallo de calidad.';
+ byId('metric-title').textContent=scope==='case'?'Metrics for scenario '+byId('case').value:(scope==='common'?'Common cases · ':'Metrics for ')+(data.project_names[byId('project').value]||byId('project').value);
+ byId('metric-note').textContent=(scope==='common'?'Only cases with evaluable observations from all four models; quality failures are retained. ':scope==='project'?'Coverage may differ across models. Use “Same cases across all 4” to compare a common selection. ':'')+'TTFT includes the first text or tool delta. '+(scope!=='case'?'Medians use complete conversations. ':'Medians use accepted calls and recorded turns, including incomplete conversations. ')+'Per-turn timings include orchestration and simulated tool responses. Quota waits are excluded. Milestones allow extra steps. Rules are explicit checks, not an exhaustive semantic evaluation. No language flag does not guarantee no leakage. Costs are calculated, not invoices; rejections are not scored as quality failures.';
  for(const value of ['project','common','case'])byId('scope-'+value).setAttribute('aria-pressed',scope===value);
 }
 function drawConversations(){
  const selected=selection(),panes=byId('panes');panes.replaceChildren();
  for(const model of models){
   const r=selected.find(x=>x.model===model),root=node('article','','pane');root.append(node('h3',model));panes.append(root);
-  if(!r){root.append(node('p','No hay observación para este caso.','empty'));continue;}
-  root.append(node('p','Registrado: '+status(r.raw_status)+' · Revisado: '+status(r.status),'meta'));
-  const mini=node('div','','mini');for(const [label,value] of [['TTFT',seconds(r.metrics?.ttft_s)],['Latencia',seconds(r.metrics?.latency_s)],['Costo',r.metrics?.tested?usd(r.metrics.cost_usd):'—']]){const box=node('div','');box.append(node('b',value),node('span',label));mini.append(box);}root.append(mini);
-  if(r.adjudicated)root.append(node('p','Cierre silencioso permitido por el prompt. Historial original conservado.','meta'));
-  if(!r.history.length)root.append(node('p','No hay mensajes registrados para esta combinación.','empty'));
+  if(!r){root.append(node('p','No observation for this case.','empty'));continue;}
+  root.append(node('p','Recorded: '+status(r.raw_status)+' · Reviewed: '+status(r.status),'meta'));
+  const mini=node('div','','mini');for(const [label,value] of [['TTFT',seconds(r.metrics?.ttft_s)],['Latency',seconds(r.metrics?.latency_s)],['Cost',r.metrics?.tested?usd(r.metrics.cost_usd):'—']]){const box=node('div','');box.append(node('b',value),node('span',label));mini.append(box);}root.append(mini);
+  if(r.adjudicated)root.append(node('p','Silent closing allowed by the prompt. Original history preserved.','meta'));
+  if(!r.history.length)root.append(node('p','No messages recorded for this combination.','empty'));
   let turn=-1,visible=0;
   for(const m of r.history){
    if(m.role==='system')continue;if(m.role==='user')turn++;
    if(byId('turn').value!=='all'&&String(turn)!==byId('turn').value)continue;
    visible++;const item=node('div','','message '+m.role);
-   item.append(node('div',(({user:'USUARIO SIMULADO',assistant:'MODELO',tool:'RESULTADO SIMULADO DE TOOL'})[m.role]||m.role)+(turn>=0?' · TURNO '+(turn+1):' · INICIO'),'role'));
+   item.append(node('div',(({user:'SIMULATED USER',assistant:'MODEL',tool:'SIMULATED TOOL RESULT'})[m.role]||m.role)+(turn>=0?' · TURN '+(turn+1):' · START'),'role'));
    if(m.content)item.append(node('div',typeof m.content==='string'?m.content:JSON.stringify(m.content,null,2),'content'));
-   else if(!m.tool_calls?.length)item.append(node('div','Sin texto visible.','empty'));
+   else if(!m.tool_calls?.length)item.append(node('div','No visible text.','empty'));
    if(m.tool_calls?.length){const d=node('details','');d.append(node('summary','Function calls ('+m.tool_calls.length+')'));d.append(node('pre',JSON.stringify(m.tool_calls,null,2)));item.append(d);}root.append(item);
   }
-  if(r.history.length&&!visible)root.append(node('p','Este modelo no registró el turno seleccionado.','empty'));
+  if(r.history.length&&!visible)root.append(node('p','This model did not record the selected turn.','empty'));
  }
 }
 function draw(){drawMetrics();drawConversations();}
-function scenario(){const rows=selection(),n=Math.max(0,...rows.map(r=>r.history.filter(m=>m.role==='user').length));options('turn',['all',...Array.from({length:n},(_,i)=>String(i))],v=>v==='all'?'Todos los turnos':'Turno '+(Number(v)+1));byId('description').textContent=rows[0]?.description||'';draw();}
+function scenario(){const rows=selection(),n=Math.max(0,...rows.map(r=>r.history.filter(m=>m.role==='user').length));options('turn',['all',...Array.from({length:n},(_,i)=>String(i))],v=>v==='all'?'All turns':'Turn '+(Number(v)+1));byId('description').textContent=rows[0]?.description||'';draw();}
 function project(){const rows=records.filter(r=>r.project===byId('project').value);options('case',unique(rows.map(r=>r.case)),v=>v+(rows.find(r=>r.case===v)?.scenario_name?' · '+rows.find(r=>r.case===v).scenario_name:''));scenario();}
 options('project',unique(records.map(r=>r.project)),v=>data.project_names[v]||v);
-byId('stamp').textContent='Corte: '+data.generated_at+' · Los casos sin ejecutar o bloqueados se muestran explícitamente.';
+byId('stamp').textContent='As of: '+data.generated_at+' · Unrun and blocked cases are shown explicitly.';
 byId('project').addEventListener('change',project);byId('case').addEventListener('change',scenario);byId('turn').addEventListener('change',drawConversations);
 for(const value of ['project','common','case'])byId('scope-'+value).addEventListener('click',()=>{scope=value;drawMetrics();});project();
 </script></html>"""
