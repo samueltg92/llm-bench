@@ -16,6 +16,7 @@ from pypdf import PdfReader
 from llm_bench import config
 from llm_bench.adjudication import silent_close
 from llm_bench.experiment import inputs
+from llm_bench.language_review import review_signals
 from llm_bench.onepager import render, summarize
 from llm_bench.privacy import external_path, fingerprint, write_private
 from llm_bench.report import conversation_review, read_lines
@@ -29,6 +30,7 @@ def main():
     parser.add_argument("--cost-root", type=Path, required=True)
     parser.add_argument("--exclude-runs-file", type=Path)
     parser.add_argument("--adjudication-policy", type=Path)
+    parser.add_argument("--language-policy", type=Path)
     parser.add_argument("--note", action="append", default=[])
     args = parser.parse_args()
     load_dotenv(external_path(args.env_file), override=True)
@@ -39,6 +41,9 @@ def main():
     policies = (json.loads(external_path(args.adjudication_policy).read_text())
                 if args.adjudication_policy else {})
     adjudications = []
+    language_policy = (json.loads(external_path(args.language_policy).read_text())
+                       if args.language_policy else {})
+    language_reviews = []
     planned = Counter(b.project for b, s in pairs)
     names = {"mistral-small-4": "Mistral Small 4", "glm-5.3-flash": "GLM 5.3 Flash",
              "gpt-oss-120b": "GPT-OSS 120B", "gemma-4-31b": "Gemma 4 31B (mín.)"}
@@ -61,6 +66,7 @@ def main():
                 observations.add(key)
                 transcript_path = path.parent / "transcripts" / f"{run['run_id']}.json"
                 transcript = json.loads(transcript_path.read_text())
+                language_reviews.extend(review_signals(transcript, language_policy))
                 bundle, scenario = pair_lookup[identity]
                 corrected = silent_close(transcript, scenario, bundle,
                                          policies.get(run["project"], {}))
@@ -88,6 +94,13 @@ def main():
     data["calls_without_measured_cost"] = unknown
     data["generated_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     data["adjudicated_silent_closes"] = len(adjudications)
+    data["language_review"] = dict(Counter(r["decision"] for r in language_reviews))
+    language_note = (
+        f"Idioma: {data['language_review'].get('confirmed_foreign', 0)} señales confirmadas, "
+        f"{data['language_review'].get('false_positive_spanish', 0)} falsos positivos y "
+        f"{data['language_review'].get('pending', 0)} pendientes de revisión."
+    )
+    data["notes"] = [note.replace("{language_review}", language_note) for note in data["notes"]]
     data["pricing_sources"] = {k: v.get("source_url") for k, v in
                                config.yaml_data(args.config_dir / "pricing.yaml")["models"].items()
                                if k in names}
@@ -113,6 +126,7 @@ def main():
         write_private(review / "transcripts" / original.name, json.loads(original.read_text()))
     conversation_review(review)
     write_private(review / "adjudications.json", adjudications)
+    write_private(review / "language-review.json", language_reviews)
     write_private(out / "validation.json", {"pages": 1, "publication_guard_passed": True,
                   "selected_conversations": len(runs), "excluded_diagnostics": len(excluded),
                   "private_review_directory": "../conversation-review"})
