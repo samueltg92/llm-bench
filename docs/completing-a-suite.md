@@ -78,3 +78,13 @@ The interpreter never edits raw transcripts, fabricates TTFT or makes extra API 
 an audit record next to the private conversation review. Empty responses outside the reviewed
 condition remain failures. Google and OpenAI-compatible normal STOP representations are treated
 equally when yielding to a question already spoken immediately before routing.
+
+## Refreshing a running report
+
+`scripts/refresh_onepager.py --args-file /private/path/report-args.txt`
+refreshes the same artifacts as completed case records or review policies change. It invokes
+only the local report generator, never an LLM API. The planned count is read from the report. Use `--once` for a single refresh.
+The watcher stops when all case dispositions are present or its bounded watch window ends,
+and writes `refresh-status.json`. Quota blocks count as recorded dispositions, not successful
+conversations. Language signals may still require review. Use `{execution_status}` in an
+external report note for an accurate description of recorded versus unrun combinations.

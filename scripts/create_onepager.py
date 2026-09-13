@@ -138,7 +138,13 @@ def main():
         f"{data['language_review'].get('false_positive_spanish', 0)} false positives and "
         f"{data['language_review'].get('pending', 0)} pending review."
     )
-    data["notes"] = [note.replace("{language_review}", language_note) for note in data["notes"]]
+    coverage_note = (
+        "All planned combinations have recorded outcomes; quota blocks are included."
+        if data["tested"] >= data["planned_combinations"]
+        else "Partial coverage: some combinations have no recorded outcome yet."
+    )
+    data["notes"] = [note.replace("{language_review}", language_note)
+                     .replace("{execution_status}", coverage_note) for note in data["notes"]]
     data["pricing_sources"] = {k: v.get("source_url") for k, v in
                                config.yaml_data(args.config_dir / "pricing.yaml")["models"].items()
                                if k in names}
