@@ -67,7 +67,8 @@ def main():
     for model in data["models"]:
         group_rows.append(len(rows))
         label = f"{model['name']}  |  {model['profile']}  |  {model['note']}"
-        rows.append([para(label, small), "", "", "", "", "", ""])
+        group_label = link(label, model["url"]) if model.get("url") else para(label, small)
+        rows.append([group_label, "", "", "", "", "", ""])
         if len(model["providers"]) > 3:
             raise ValueError("Brief supports at most three shortlisted endpoints per model")
         for p in model["providers"]:
@@ -118,6 +119,8 @@ def main():
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     pdf.chmod(0o600)
     csv_path = out / "OpenRouter-provider-details.csv"
+    shortlist_count = len(exported)
+    exported.extend(data.get("additional_csv_rows", []))
     fields = list(dict.fromkeys(key for row in exported for key in row))
     with csv_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -125,7 +128,8 @@ def main():
         writer.writerows(exported)
     csv_path.chmod(0o600)
     write_private(out / "source-data.json", data)
-    print(json.dumps({"pdf": pdf.name, "shortlisted_endpoints": len(exported)}))
+    print(json.dumps({"pdf": pdf.name, "shortlisted_endpoints": shortlist_count,
+                      "detail_rows": len(exported)}))
 
 
 if __name__ == "__main__":
